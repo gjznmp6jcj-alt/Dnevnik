@@ -349,7 +349,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 20</p>
+    <p class="note">Версия приложения: 2026-10-25 · 21</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1973,9 +1973,9 @@ function checkStartParam(){
 }
 
 /* ================= ИНТЕГРАЦИИ И СЕРВЕР ================= */
-let SERVER="", HEALTH_SC="", serverInfo=null, famState=null, famPoll=null;
+let SERVER="", HEALTH_SC="https://www.icloud.com/shortcuts/bf0419665a3f440091fa27887bbad11a", serverInfo=null, famState=null, famPoll=null;
 async function loadConfig(){
-  try{ const r=await fetch("config.json",{cache:"no-store"}); if(r.ok){ const j=await r.json(); SERVER=String(j.server||"").trim().replace(/\/+$/,""); HEALTH_SC=String(j.healthShortcut||"").trim(); } }catch(e){}
+  try{ const r=await fetch("config.json",{cache:"no-store"}); if(r.ok){ const j=await r.json(); SERVER=String(j.server||"").trim().replace(/\/+$/,""); if(j.healthShortcut) HEALTH_SC=String(j.healthShortcut).trim(); } }catch(e){}
   try{ const o=localStorage.getItem("serverOverride"); if(o) SERVER=o.trim().replace(/\/+$/,""); }catch(e){}
 }
 const serverReady=()=>!!(SERVER && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
