@@ -7,6 +7,7 @@
     "bindings": [{ "name": "STORE", "class_name": "DnevnikStore" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DnevnikStore"] }],
+  "ai": { "binding": "AI" },
   "triggers": { "crons": ["*/30 * * * *"] },
   "vars": { "APP_URL": "https://gjznmp6jcj-alt.github.io/Dnevnik/" },
   "observability": { "enabled": true }

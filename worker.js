@@ -158,13 +158,8 @@ async function send(env, chatId, msg, extra = {}) {
 async function setup(req, env, url) {
   if (url.searchParams.get("token") !== env.BOT_TOKEN) return text("Добавь в адрес ?token=ТОКЕН_БОТА", 403);
   const secret = (await sha("hook" + env.BOT_TOKEN)).slice(0, 40);
-  const hook = await tg(env, "setWebhook", { url: `${url.origin}/tg`, secret_token: secret, allowed_updates: ["message"] });
-  await tg(env, "setMyCommands", { commands: [
-    { command: "start", description: "Начать" },
-    { command: "today", description: "Итог сегодняшнего дня" },
-    { command: "week", description: "Отчёт за неделю" },
-    { command: "stop", description: "Выключить напоминания" },
-  ] });
+  const hook = await tg(env, "setWebhook", { url: `${url.origin}/tg`, secret_token: secret, allowed_updates: ["message", "callback_query"] });
+  await tg(env, "setMyCommands", { commands: BOT_COMMANDS });
   await botUsername(env);
   const okModel = env.ANTHROPIC_API_KEY ? "есть" : "НЕТ — фото еды работать не будет";
   return text(`Готово.\nВебхук: ${hook.ok ? "подключён ✅" : "ошибка: " + JSON.stringify(hook)}\nКлюч ИИ: ${okModel}\nХранилище: ${env.KV ? "подключено ✅" : "НЕТ"}\nAPP_URL: ${env.APP_URL || "НЕ ЗАДАН"}`);
@@ -174,7 +169,17 @@ async function onTelegram(req, env, ctx) {
   const secret = (await sha("hook" + env.BOT_TOKEN)).slice(0, 40);
   if (req.headers.get("x-telegram-bot-api-secret-token") !== secret) return text("no", 403);
   const upd = await req.json();
-  const m = upd.message; if (!m || !m.text) return text("ok");
+  if (!(await env.KV.get("hook:v2"))) {   // один раз: включаем кнопки под сообщениями
+    await tg(env, "setWebhook", { url: `${new URL(req.url).origin}/tg`, secret_token: secret, allowed_updates: ["message", "callback_query"] });
+    await env.KV.put("hook:v2", "1");
+  }
+  if (upd.callback_query) { ctx.waitUntil(onCallback(env, upd.callback_query).catch(() => {})); return text("ok"); }
+  const m = upd.message; if (!m || !m.from) return text("ok");
+  if (m.chat && m.chat.type !== "private") return text("ok");
+  if (!m.text || !m.text.trim().startsWith("/")) {
+    if (m.text || m.voice || m.audio || m.photo) ctx.waitUntil(botMessage(env, m));
+    return text("ok");
+  }
   const uid = String(m.from.id), cmd = m.text.trim().split(/\s+/)[0].toLowerCase();
   if (cmd === "/start") {
     const arg = m.text.trim().split(/\s+/)[1] || "";
@@ -190,6 +195,8 @@ async function onTelegram(req, env, ctx) {
     await ensureUser(env, uid, m.from.first_name || "");
     await botDescribe(env);
     await send(env, uid, introText(m.from.first_name), { reply_markup: openBtn(env, "Открыть дневник 🌿") });
+  } else if (cmd === "/help") {
+    await send(env, uid, HELP_TEXT, { reply_markup: openBtn(env, "Открыть дневник 🌿") });
   } else if (cmd === "/today") {
     const s = await userSettings(env, uid);
     await send(env, uid, await dayText(env, uid, localDate(new Date(), s.tz)), { reply_markup: openBtn(env) });
@@ -201,19 +208,308 @@ async function onTelegram(req, env, ctx) {
     await kput(env, `s:${uid}`, s);
     await send(env, uid, "Напоминания выключены. Включить снова — в приложении: «Профиль» → «Напоминания бота».");
   } else {
-    await send(env, uid, "Я понимаю команды /today, /week и /stop. А всё остальное — в приложении 👇", { reply_markup: openBtn(env) });
+    await send(env, uid, "Я понимаю команды /today, /week и /stop. А ещё просто напиши, что ты съела, или пришли голосовое, фото тарелки или ссылку на рецепт 🙂", { reply_markup: openBtn(env) });
   }
   return text("ok");
 }
 
+/* ---------------- еда и рецепты прямо в чате с ботом ---------------- */
+const MEALS = ["Завтрак", "Обед", "Перекус", "Ужин"];
+const autoMeal = h => h < 11 ? "Завтрак" : h < 15 ? "Обед" : h < 18 ? "Перекус" : "Ужин";
+const r1 = n => Math.round((+n || 0) * 10) / 10;
+const uid8 = () => rid(8) + Date.now().toString(36).slice(-4);
+
+async function claudeJSON(env, uid, content, maxTokens = 1500) {
+  if (!env.ANTHROPIC_API_KEY) throw new Error("на сервере нет ключа ИИ");
+  const day = new Date().toISOString().slice(0, 10), ck = `ai:${uid}:${day}`;
+  const used = +(await env.KV.get(ck) || 0);
+  if (used >= AI_DAILY_LIMIT) throw new Error(`на сегодня лимит ${AI_DAILY_LIMIT} запросов к ИИ исчерпан`);
+  const call = model => fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content }] }),
+  });
+  let r = await call(env.AI_MODEL || MODEL_MAIN);
+  if (!r.ok && (r.status === 400 || r.status === 404)) r = await call(MODEL_FALLBACK);
+  const data = await r.json();
+  if (!r.ok) throw new Error((data.error && data.error.message) || ("ИИ ответил ошибкой " + r.status));
+  await env.KV.put(ck, String(used + 1), { expirationTtl: 60 * 60 * 30 });
+  const t = (data.content || []).map(c => c.text || "").join(""), m = t.match(/\{[\s\S]*\}/);
+  return JSON.parse(m ? m[0] : t);
+}
+
+/* блюда пользователя — чтобы ИИ узнавал «моя овсянка» */
+async function userDishes(env, uid) {
+  const d = await kget(env, `u:${uid}:d:dishes`);
+  return (d && d.v && d.v.items) || [];
+}
+function dishStats(d) {
+  const tot = { g: 0, kcal: 0, p: 0, f: 0, c: 0 };
+  (d.ing || []).forEach(i => { const k = (+i.g || 0) / 100; tot.g += +i.g || 0; tot.kcal += k * (+i.kcal || 0); tot.p += k * (+i.p || 0); tot.f += k * (+i.f || 0); tot.c += k * (+i.c || 0); });
+  const g = tot.g || 1, P = Math.max(1, +d.portions || 1);
+  return { per100: { kcal: r1(tot.kcal / g * 100), p: r1(tot.p / g * 100), f: r1(tot.f / g * 100), c: r1(tot.c / g * 100) }, portionG: Math.round(tot.g / P), tot, P };
+}
+
+/* запись в дневник на сервере (приложение подтянет при открытии) */
+async function addMeals(env, uid, date, meal, items) {
+  const k = `u:${uid}:d:d-${date}`, cur = await kget(env, k);
+  const v = (cur && cur.v) || { date, meals: [], workouts: [] };
+  v.meals = v.meals || []; v.workouts = v.workouts || [];
+  const ids = [];
+  for (const it of items) { const id = uid8(); ids.push(id); v.meals.push({ id, meal, name: it.name, g: r1(it.g), kcal: r1(it.kcal), p: r1(it.p), f: r1(it.f), c: r1(it.c) }); }
+  await kput(env, k, { v, at: Date.now() });
+  return { ids, day: v };
+}
+async function removeMeals(env, uid, date, ids) {
+  const k = `u:${uid}:d:d-${date}`, cur = await kget(env, k);
+  if (!cur || !cur.v) return 0;
+  const before = (cur.v.meals || []).length;
+  cur.v.meals = (cur.v.meals || []).filter(x => !ids.includes(x.id));
+  await kput(env, k, { v: cur.v, at: Date.now() });
+  return before - cur.v.meals.length;
+}
+const totalsOf = list => list.reduce((t, x) => { const k = (+x.g || 0) / 100; t.kcal += k * x.kcal; t.p += k * x.p; t.f += k * x.f; t.c += k * x.c; return t; }, { kcal: 0, p: 0, f: 0, c: 0 });
+async function syncSummary(env, uid, date, day) {
+  const sk = `d:${uid}:${date}`, s = (await kget(env, sk)) || {};
+  const t = totalsOf(day.meals || []);
+  const next = { ...s, kcal: Math.round(t.kcal), p: Math.round(t.p), f: Math.round(t.f), c: Math.round(t.c), n: (day.meals || []).length };
+  await kput(env, sk, next, 60 * 60 * 24 * 45);
+  return next;
+}
+function loggedText(meal, date, today, items, sum) {
+  const t = totalsOf(items);
+  const when = date === today ? "" : date === addDays(today, -1) ? " (вчера)" : ` (${date.split("-").reverse().slice(0, 2).join(".")})`;
+  const lines = items.map(x => `• ${esc(x.name)} — ${fmt(x.g)} г, ${fmt(x.g / 100 * x.kcal)} ккал`).join("\n");
+  let day = "";
+  if (date === today && sum) {
+    const norm = (sum.norm || 0) + (sum.burn || 0);
+    day = norm ? `\n\nЗа сегодня: <b>${fmt(sum.kcal)}</b> из ${fmt(norm)} ккал — ${sum.kcal <= norm ? `осталось ${fmt(norm - sum.kcal)}` : `перебор ${fmt(sum.kcal - norm)}`}` : `\n\nЗа сегодня: <b>${fmt(sum.kcal)}</b> ккал`;
+  }
+  return `✅ Записала в <b>${meal}</b>${when}:\n${lines}\nИтого: ${fmt(t.kcal)} ккал · Б ${fmt(t.p)} · Ж ${fmt(t.f)} · У ${fmt(t.c)} г${day}`;
+}
+async function logAndReply(env, uid, s, mealIn, dayOffset, items) {
+  const now = localNow(new Date(), s.tz), today = now.toISOString().slice(0, 10);
+  const date = addDays(today, Math.max(-7, Math.min(0, Math.round(+dayOffset || 0))));
+  const meal = MEALS.includes(mealIn) ? mealIn : autoMeal(now.getUTCHours());
+  const { ids, day } = await addMeals(env, uid, date, meal, items);
+  const sum = await syncSummary(env, uid, date, day);
+  const tok = rid(10); await kput(env, `undo:${uid}:${tok}`, { date, ids }, 60 * 60 * 24 * 2);
+  await send(env, uid, loggedText(meal, date, today, items, sum), { reply_markup: { inline_keyboard: [[{ text: "↩️ Отменить", callback_data: `u:${tok}` }, { text: "Открыть дневник", web_app: { url: env.APP_URL } }]] } });
+}
+
+const FOOD_TEXT_PROMPT = (dishes) => `Ты — нутрициолог в дневнике питания. Пользователь написал в чат, что съел. Разбери сообщение на отдельные продукты и блюда.
+— Вес: если указан — используй его. Если указаны штуки, ложки, стаканы, «тарелка», «порция» — переведи в граммы по типичным размерам (1 яйцо ≈ 55 г, 1 котлета ≈ 80 г, тарелка супа ≈ 300 г, порция гарнира ≈ 150 г, ч. л. сахара ≈ 5 г). Если вес не указан — оцени обычную порцию.
+— Пищевая ценность — на 100 г продукта в том виде, как его ели (каша варёная, мясо жареное и т.п.).
+— Названия по-русски, коротко: «Гречка варёная», «Котлета куриная жареная».
+— meal: если в сообщении сказано «на завтрак/обед/ужин/перекус» — укажи "Завтрак", "Обед", "Перекус" или "Ужин", иначе null.
+— day_offset: 0 — сегодня; -1 если «вчера»; -2 если «позавчера».
+— Если сообщение не про еду — верни пустой items и в note коротко скажи, что ты понимаешь.
+${dishes.length ? `Свои блюда пользователя (если он упоминает их — используй эти значения и порцию):\n${dishes.map(d => { const s = dishStats(d); return `«${d.name}»: порция ${s.portionG} г, на 100 г ${s.per100.kcal} ккал, Б ${s.per100.p}, Ж ${s.per100.f}, У ${s.per100.c}`; }).join("\n")}\n` : ""}Ответь ТОЛЬКО JSON без пояснений:
+{"meal":null,"day_offset":0,"items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число}],"note":""}`;
+
+async function botFoodText(env, uid, s, textIn, viaVoice) {
+  const dishes = (await userDishes(env, uid)).slice(0, 40);
+  const j = await claudeJSON(env, uid, [{ type: "text", text: FOOD_TEXT_PROMPT(dishes) + `\n\nСообщение пользователя: «${String(textIn).slice(0, 1500)}»` }]);
+  const items = (j.items || []).filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 80), g: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0 }));
+  if (!items.length) {
+    await send(env, uid, `${viaVoice ? `🎙 Услышала: «${esc(textIn)}»\n\n` : ""}${esc(j.note || "Не поняла, что записать.")}\n\nНапиши, что ты съела, например: «на обед 150 г гречки и котлета» — и я запишу в дневник. Можно голосовым или фото тарелки. А ссылку на рецепт я сохраню как блюдо.`, { reply_markup: openBtn(env) });
+    return;
+  }
+  if (viaVoice) await send(env, uid, `🎙 Услышала: «${esc(textIn)}»`);
+  await logAndReply(env, uid, s, j.meal, j.day_offset, items);
+}
+
+async function tgFileBytes(env, fileId) {
+  const f = await tg(env, "getFile", { file_id: fileId });
+  if (!f.ok) throw new Error("не получилось скачать файл из Telegram");
+  const r = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${f.result.file_path}`);
+  if (!r.ok) throw new Error("не получилось скачать файл из Telegram");
+  return { bytes: new Uint8Array(await r.arrayBuffer()), path: f.result.file_path };
+}
+const b64 = bytes => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); };
+
+async function botVoice(env, uid, s, m) {
+  if (!env.AI) { await send(env, uid, "Голосовые пока не подключены на сервере. Напиши текстом, что ты съела 🙂"); return; }
+  const v = m.voice || m.audio;
+  if ((v.duration || 0) > 120) { await send(env, uid, "Голосовое длинновато — уложись в 2 минуты 🙂"); return; }
+  const { bytes } = await tgFileBytes(env, v.file_id);
+  let textOut = "";
+  try { const r = await env.AI.run("@cf/openai/whisper-large-v3-turbo", { audio: b64(bytes), language: "ru" }); textOut = (r && r.text) || ""; }
+  catch (e) { const r = await env.AI.run("@cf/openai/whisper", { audio: [...bytes] }); textOut = (r && r.text) || ""; }
+  textOut = textOut.trim();
+  if (!textOut) { await send(env, uid, "Не разобрала голосовое 😔 Попробуй ещё раз или напиши текстом."); return; }
+  if (/https?:\/\//.test(textOut)) return botRecipeUrl(env, uid, textOut.match(/https?:\/\/\S+/)[0]);
+  await botFoodText(env, uid, s, textOut, true);
+}
+
+async function botPhoto(env, uid, s, m) {
+  const ph = m.photo[m.photo.length - 1];
+  const { bytes } = await tgFileBytes(env, ph.file_id);
+  const res = await aiPhoto(env, { id: uid }, { image: b64(bytes), mime: "image/jpeg", hint: m.caption || "" });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error);
+  const items = (j.items || []).map(x => ({ name: x.name, g: x.grams, kcal: x.kcal, p: x.p, f: x.f, c: x.c }));
+  if (!items.length) { await send(env, uid, `На фото не нашла еду. ${esc(j.note || "")}\nПопробуй сфотографировать тарелку поближе или напиши текстом.`); return; }
+  const cap = (m.caption || "").toLowerCase();
+  const meal = /завтрак/.test(cap) ? "Завтрак" : /обед/.test(cap) ? "Обед" : /ужин/.test(cap) ? "Ужин" : /перекус/.test(cap) ? "Перекус" : null;
+  await logAndReply(env, uid, s, meal, /вчера/.test(cap) ? -1 : 0, items);
+}
+
+/* ---------- рецепт по ссылке или тексту → блюдо ---------- */
+function recipeFromLd(html) {
+  const blocks = [...html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)].map(x => x[1]);
+  const walk = o => {
+    if (!o || typeof o !== "object") return null;
+    if (Array.isArray(o)) { for (const x of o) { const r = walk(x); if (r) return r; } return null; }
+    const t = o["@type"]; if (t === "Recipe" || (Array.isArray(t) && t.includes("Recipe"))) return o;
+    if (o["@graph"]) return walk(o["@graph"]);
+    return null;
+  };
+  for (const b of blocks) { try { const r = walk(JSON.parse(b.trim())); if (r) return r; } catch (e) {} }
+  return null;
+}
+const htmlText = h => h.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&[a-z]+;/g, " ").replace(/\s+/g, " ").trim();
+
+const RECIPE_PROMPT = `Ты — нутрициолог. По рецепту составь блюдо для дневника питания.
+— name: короткое название блюда по-русски.
+— portions: число порций из рецепта (если не указано — оцени).
+— ing: ингредиенты на ВСЁ блюдо. Вес каждого — в граммах (переведи штуки, ложки, стаканы, «щепотку»; специи и соль можно не включать, если их меньше 5 г). Пищевая ценность — на 100 г ингредиента в том виде, как он кладётся в блюдо (обычно сырой). Названия по-русски, коротко.
+— Если текст — не рецепт, верни пустой ing и в note скажи, что не так.
+Ответь ТОЛЬКО JSON без пояснений:
+{"name":"...","portions":число,"ing":[{"name":"...","g":число,"kcal":число,"p":число,"f":число,"c":число}],"note":""}`;
+
+async function saveDish(env, uid, dish) {
+  const k = `u:${uid}:d:dishes`, cur = await kget(env, k);
+  const items = (cur && cur.v && cur.v.items) || [];
+  let name = dish.name, n = 2;
+  while (items.some(x => String(x.name).toLowerCase() === name.toLowerCase())) name = `${dish.name} (${n++})`;
+  const d = { ...dish, name };
+  await kput(env, k, { v: { items: items.concat([d]) }, at: Date.now() });
+  return d;
+}
+async function botRecipe(env, uid, sourceText, sourceUrl) {
+  const j = await claudeJSON(env, uid, [{ type: "text", text: RECIPE_PROMPT + `\n\nРецепт${sourceUrl ? ` (${sourceUrl})` : ""}:\n${sourceText.slice(0, 14000)}` }], 2500);
+  const ing = (j.ing || []).filter(x => x && x.name && +x.g > 0).map(x => ({ name: String(x.name).slice(0, 60), g: Math.round(+x.g), kcal: r1(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c) }));
+  if (!ing.length) { await send(env, uid, `Не получилось разобрать рецепт. ${esc(j.note || "")}\nПопробуй прислать текст рецепта сообщением — с ингредиентами и количеством.`); return; }
+  const dish = await saveDish(env, uid, { id: uid8(), name: String(j.name || "Блюдо по рецепту").slice(0, 60), portions: Math.max(1, Math.round(+j.portions || 1)), ing, src: sourceUrl || undefined });
+  const st = dishStats(dish), per = st.tot.kcal / st.P;
+  await send(env, uid, `🍲 Сохранила блюдо <b>«${esc(dish.name)}»</b>\n${st.P} ${st.P === 1 ? "порция" : st.P < 5 ? "порции" : "порций"} по ~${fmt(st.portionG)} г — <b>${fmt(per)} ккал</b> на порцию\nБ ${fmt(st.tot.p / st.P)} · Ж ${fmt(st.tot.f / st.P)} · У ${fmt(st.tot.c / st.P)} г на порцию\n\nИнгредиенты: ${ing.map(i => `${esc(i.name)} ${fmt(i.g)} г`).join(", ")}\n\nБлюдо уже в «Меню» → «Блюда» — его можно добавить в план недели или в дневник. Если что-то посчиталось не так, поправь там.`,
+    { reply_markup: { inline_keyboard: [[{ text: "🍽 Записать 1 порцию", callback_data: `rp:${dish.id}` }], [{ text: "Открыть дневник", web_app: { url: env.APP_URL } }]] } });
+}
+async function botRecipeUrl(env, uid, link) {
+  let html = "";
+  try {
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 12000);
+    const r = await fetch(link, { signal: ctl.signal, redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", "accept-language": "ru,en;q=0.8" } });
+    clearTimeout(tm);
+    if (r.ok) html = (await r.text()).slice(0, 2_000_000);
+  } catch (e) {}
+  if (!html) { await send(env, uid, "Не получилось открыть эту страницу — сайт не пускает. Скопируй текст рецепта (ингредиенты с количеством) и пришли сообщением — я сохраню блюдо."); return; }
+  const ld = recipeFromLd(html);
+  let src;
+  if (ld) {
+    const ingr = [].concat(ld.recipeIngredient || ld.ingredients || []).join("\n");
+    src = `Название: ${ld.name || ""}\nПорций: ${[].concat(ld.recipeYield || "").join(" ")}\nИнгредиенты:\n${ingr}`;
+  } else src = htmlText(html);
+  if (ld ? ![].concat(ld.recipeIngredient || ld.ingredients || []).length : src.length < 200) { await send(env, uid, "На странице не нашла рецепт. Пришли текст рецепта сообщением — я сохраню блюдо."); return; }
+  await botRecipe(env, uid, src, link);
+}
+
+/* ---------- кнопки под сообщениями ---------- */
+async function onCallback(env, cq) {
+  const uid = String(cq.from.id), data = String(cq.data || "");
+  const ack = t => tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: t || "" });
+  if (data.startsWith("u:")) {
+    const u = await kget(env, `undo:${uid}:${data.slice(2)}`);
+    if (!u) { await ack("Уже нельзя отменить"); return; }
+    const n = await removeMeals(env, uid, u.date, u.ids);
+    await env.KV.delete(`undo:${uid}:${data.slice(2)}`);
+    const cur = await kget(env, `u:${uid}:d:d-${u.date}`); if (cur && cur.v) await syncSummary(env, uid, u.date, cur.v);
+    await ack(n ? "Отменила" : "Записей уже нет");
+    if (cq.message) await tg(env, "editMessageText", { chat_id: uid, message_id: cq.message.message_id, text: "↩️ Запись отменена.", parse_mode: "HTML" });
+    return;
+  }
+  if (data.startsWith("rp:")) {
+    const d = (await userDishes(env, uid)).find(x => x.id === data.slice(3));
+    if (!d) { await ack("Блюдо не найдено"); return; }
+    await ack("Записываю…");
+    const st = dishStats(d), s = await userSettings(env, uid);
+    await logAndReply(env, uid, s, null, 0, [{ name: d.name, g: st.portionG, ...st.per100 }]);
+    return;
+  }
+  await ack();
+}
+
+async function botMessage(env, m) {
+  const uid = String(m.from.id), s = await userSettings(env, uid);
+  await ensureUser(env, uid, m.from.first_name || "");
+  await tg(env, "sendChatAction", { chat_id: uid, action: "typing" });
+  try {
+    if (m.voice || m.audio) return await botVoice(env, uid, s, m);
+    if (m.photo) return await botPhoto(env, uid, s, m);
+    const t = (m.text || "").trim();
+    const link = t.match(/https?:\/\/[^\s]+/);
+    if (link) return await botRecipeUrl(env, uid, link[0]);
+    if (t.length > 160 && /ингредиент|рецепт|приготовлени/i.test(t)) return await botRecipe(env, uid, t, null);
+    return await botFoodText(env, uid, s, t, false);
+  } catch (e) {
+    await send(env, uid, `Не получилось: ${esc(String(e && e.message || e))}. Попробуй ещё раз чуть позже или запиши в приложении.`, { reply_markup: openBtn(env) });
+  }
+}
+
 /* ---------------- вступление бота ---------------- */
-const BOT_DESC = "Дневник похудения 🌿\n\n🍽 Считает калории и БЖУ: пишешь продукт и граммы — остальное посчитается само\n📷 Еда по фото, штрихкоду и этикетке\n📅 Меню на неделю и список покупок\n⚖️ Вес, прогресс и прогноз до цели\n❤️ Шаги и активность из «Здоровья» на iPhone\n👨‍👩‍👧 Общее меню для семьи\n🔔 Напоминания и итоги дня и недели\n\nНажми «Старт» — и начнём.";
+const BOT_DESC = "Дневник похудения 🌿\n\n🍽 Считает калории и БЖУ: пишешь продукт и граммы — остальное посчитается само\n✍️ Можно писать прямо в чат: «на обед 150 г гречки и котлета» — или голосовым\n🔗 Пришли ссылку на рецепт — сохраню блюдо с калориями\n📷 Еда по фото, штрихкоду и этикетке\n📅 Меню на неделю и список покупок\n⚖️ Вес, прогресс и прогноз до цели\n❤️ Шаги и активность из «Здоровья» на iPhone\n👨‍👩‍👧 Общее меню для семьи\n🔔 Напоминания и итоги дня и недели\n\nНажми «Старт» — и начнём.";
 const BOT_SHORT = "Считаю калории по продукту и граммам, фото и штрихкоду. Меню на неделю, вес, шаги и напоминания 🌿";
 async function botDescribe(env) {
-  if (await env.KV.get("desc:v1")) return;
+  if (await env.KV.get("desc:v3")) return;
   await tg(env, "setMyDescription", { description: BOT_DESC });
   await tg(env, "setMyShortDescription", { short_description: BOT_SHORT });
-  await env.KV.put("desc:v1", "1");
+  await tg(env, "setMyCommands", { commands: BOT_COMMANDS });
+  await env.KV.put("desc:v3", "1");
+}
+const BOT_COMMANDS = [
+  { command: "start", description: "Начать" },
+  { command: "help", description: "Что я умею и как записывать еду" },
+  { command: "today", description: "Итог сегодняшнего дня" },
+  { command: "week", description: "Отчёт за неделю" },
+  { command: "stop", description: "Выключить напоминания" },
+];
+const HELP_TEXT = `<b>Как записывать еду прямо здесь, в чате</b> ✍️
+
+<b>Текстом</b> — просто напиши, что съела:
+• <i>на обед 150 г гречки и куриная котлета</i>
+• <i>завтрак: 2 яйца, кофе с молоком</i>
+• <i>вчера на ужин тарелка борща</i>
+Вес можно не писать — я оценю обычную порцию. Понимаю штуки, ложки, «тарелку», «порцию» и твои блюда из «Меню».
+
+🎙 <b>Голосовым</b> — скажи то же самое голосом.
+
+📷 <b>Фото тарелки</b> — я сама определю блюда и вес. В подписи можно добавить «завтрак» или «вчера».
+
+После записи я покажу калории и сколько осталось на сегодня. Ошиблась — нажми «↩️ Отменить».
+
+🔗 <b>Рецепт по ссылке</b> — пришли ссылку на рецепт с любого сайта, и я сохраню блюдо в «Меню» → «Блюда» с калориями на порцию. Если сайт не открывается — пришли текст рецепта сообщением.
+
+<b>Команды</b>
+/today — итог дня
+/week — отчёт за неделю
+/stop — выключить напоминания
+/help — эта подсказка
+
+Всё остальное — меню, вес, прогресс, семья — в дневнике 👇`;
+const NEWS_TEXT = `🆕 <b>Теперь еду можно записывать прямо в этом чате!</b>
+
+✍️ Напиши, что съела: <i>«на обед 150 г гречки и котлета»</i>
+🎙 Или скажи голосовым
+📷 Или пришли фото тарелки
+🔗 А ссылку на рецепт я сохраню как блюдо с калориями
+
+Подробнее — /help`;
+async function sendNewsOnce(env) {
+  if (await env.KV.get("news:v1")) return;
+  await env.KV.put("news:v1", "1");
+  const users = await kget(env, "users", []);
+  for (const uid of users) { try { await send(env, uid, NEWS_TEXT, { reply_markup: openBtn(env) }); } catch (e) {} }
 }
 function introText(name) {
   return `Привет${name ? ", " + esc(name) : ""}! 🌿 Я — <b>Дневник похудения</b>.
@@ -227,11 +523,15 @@ function introText(name) {
 👨‍👩‍👧 <b>Семья</b> — общее меню и покупки
 🔔 <b>Напоминаю</b> записать еду и присылаю итоги дня и недели
 
+✍️ <b>Пиши мне прямо сюда</b>: «на обед 150 г гречки и котлета» — запишу в дневник. Голосовые и фото тарелки тоже понимаю.
+🔗 <b>Пришли ссылку на рецепт</b> — сохраню блюдо с калориями на порцию.
+
 <b>С чего начать — 3 шага:</b>
 1️⃣ Нажми «Открыть дневник» ниже
 2️⃣ Заполни <b>профиль</b>: пол, возраст, рост, вес и цель — и нажми «Сохранить профиль». Без него я не посчитаю твою норму калорий
 3️⃣ Записывай еду — остальное посчитается само. В каждом разделе будут подсказки
 
+Как записывать еду в чате — /help
 Команды: /today — итог дня, /week — отчёт за неделю, /stop — выключить напоминания.`;
 }
 
@@ -459,6 +759,7 @@ const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", 
 /* ---------------- напоминания и сводки (каждые 30 минут) ---------------- */
 async function runCron(env, now) {
   try { await botDescribe(env); } catch (e) {}
+  try { await sendNewsOnce(env); } catch (e) {}
   const users = await kget(env, "users", []);
   for (const uid of users) {
     try {

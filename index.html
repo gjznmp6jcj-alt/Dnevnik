@@ -244,6 +244,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       </div>
       <label class="labelbtn" id="aiWrap" hidden style="background:var(--accent-soft);color:var(--accent)">Фото еды — ИИ посчитает сам<input type="file" accept="image/*" capture="environment" id="aiFile" hidden></label>
       <button class="ghost" id="pasteShare" style="align-self:flex-start;padding-left:0">Вставить, что прислали</button>
+      <div class="note" id="botHint" hidden style="margin:0">✍️ Можно и в чате с ботом: напиши «на обед 150 г гречки», скажи голосом или пришли фото тарелки — запишется сюда. <button class="ghost" id="botChat" style="padding:0;font-size:inherit">Открыть чат</button></div>
       <div id="dishWrap" hidden><div class="note" style="margin-bottom:6px">Мои блюда</div><div class="chips" id="dishChips"></div></div>
       <div id="recentWrap" hidden><div class="note" style="margin-bottom:6px">Недавние</div><div class="chips" id="recent"></div></div>
     </div>
@@ -357,7 +358,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-25 · 25</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-25 · 26</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2012,6 +2013,7 @@ async function initServer(){
   if(!serverReady()) return;
   try{ serverInfo=await sapi("hello",{tz:-new Date().getTimezoneOffset()}); }catch(e){ serverInfo={error:errText(e)}; }
   renderServerCards(); if(tab==="diary") renderDiary();
+  { const bh=$("botHint"); if(bh) bh.hidden=!(serverInfo&&!serverInfo.error); }
   if(serverInfo&&!serverInfo.error){ await Sync.pull(); if(serverInfo.family) famLoad(true); }
   syncDay(today()); syncDay(addDays(today(),-1));
 }
@@ -2377,6 +2379,7 @@ function bindIntegrations(){
       case "openSafari": openExternal(APP_URL+"?install=1"); break;
       case "loginGo": startLogin(); break;
       case "hcAdd": hcConnect(); break;
+      case "botChat": if(TG){ try{ TG.openTelegramLink("https://t.me/"+BOT_USERNAME); TG.close(); }catch(e){} } else openExternal("https://t.me/"+BOT_USERNAME); break;
       case "hcConnect": hcConnect(); break;
       case "hcHave": hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} break;
       case "hcRun": runHealthShortcut(); break;
@@ -2518,6 +2521,7 @@ const TIPS={
     ["#fName","Продукт и вес","Начни вводить название — калории и БЖУ посчитаются сами. Можно сразу с весом: «творог 5% 150»."],
     ["#fScan","Штрихкод и этикетка","Отсканируй штрихкод — продукт найдётся в базе. Нет в базе — сфотографируй этикетку, цифры распознаются сами."],
     ["#aiWrap","Фото еды","Сфотографируй тарелку — ИИ сам определит блюда, вес и калории."],
+    ["#botHint","Или прямо в чате с ботом","Напиши боту, что съела: «на обед 150 г гречки и котлета», скажи голосом или пришли фото — запись появится здесь. Ссылку на рецепт бот сохранит как блюдо. Подробнее — команда /help в боте."],
     ["#woType","Тренировки","Добавь тренировку и минуты — сожжённые калории прибавятся к норме дня."]
   ],
   menu:[
