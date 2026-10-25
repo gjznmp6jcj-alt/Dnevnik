@@ -1,0 +1,1 @@
+Сервер дневника: Cloudflare собирает его из файлов worker.js и wrangler.jsonc.
