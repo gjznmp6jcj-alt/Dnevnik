@@ -349,7 +349,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 19</p>
+    <p class="note">Версия приложения: 2026-10-25 · 20</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2029,6 +2029,9 @@ function applyHealth(sp){
 }
 const SC_NAME="Дневник Здоровье";
 let healthWait=0;
+const hcGet=()=>{ try{ return localStorage.getItem("hc-state")||""; }catch(e){ return ""; } };
+const hcSet=v=>{ try{ localStorage.setItem("hc-state",v); }catch(e){} };
+function hcConnect(){ hcSet("pending"); openExternal(HEALTH_SC); }
 function applyHealthData(h){
   if(!h||!/^\d{4}-\d{2}-\d{2}$/.test(h.date||"")||!h.at) return false;
   const day=clone(getDay(h.date)); if(day.health&&(day.health.at||0)>=h.at) return false;
@@ -2049,11 +2052,12 @@ async function runHealthShortcut(){
   }catch(e){ toast("Не получилось: "+errText(e)); }
 }
 document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden && hcGet()==="pending"){ hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} setTimeout(()=>{ toast("Подтягиваю данные из «Здоровья»…"); runHealthShortcut(); },700); return; }
   if(document.hidden||Date.now()>healthWait||!serverReady()) return;
   [700,2500,6000].forEach(t=>setTimeout(()=>{ Sync.lastPull=0; Sync.pull(); },t));
 });
 function healthDiaryBtn(){
-  if(!HEALTH_SC||!serverReady()||curDate!==today()) return "";
+  if(!HEALTH_SC||!serverReady()||curDate!==today()||hcGet()!=="added") return "";
   return `<button class="ghost small" id="hcRun" style="margin-top:6px;padding:6px 0">↻ Обновить шаги из «Здоровья»</button>`;
 }
 function healthCardHtml(){
@@ -2061,11 +2065,13 @@ function healthCardHtml(){
   if(!SERVER) return intro+HEALTH_GUIDE;
   if(!serverReady()) return intro+`<p class="note" style="margin:0">Войди через Telegram — и подключить «Здоровье» можно будет в два нажатия.</p>`;
   if(!HEALTH_SC) return intro+`<p class="note" style="margin:0">Скоро здесь будет подключение в два нажатия.</p>`+HEALTH_BUILD()+`<button id="hcRun">Проверить команду</button>`;
+  if(hcGet()!=="added") return intro+`
+    <button class="primary" id="hcConnect">Подключить «Здоровье»</button>
+    <p class="note" style="margin:0">Айфон покажет команду — нажми «Добавить быструю команду» и вернись сюда. Дальше всё само: в первый раз только разреши доступ к «Здоровью».</p>
+    <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Команда уже добавлена</button>`;
   return intro+`
-    <div class="small"><b>1.</b> Один раз добавь команду — нажми кнопку, потом «Добавить быструю команду».</div>
-    <button id="hcAdd">Добавить команду</button>
-    <div class="small"><b>2.</b> Подтяни данные. В первый раз айфон спросит доступ к «Здоровью» — нажми «Разрешить». Потом вернись сюда.</div>
     <button class="primary" id="hcRun">Обновить из «Здоровья»</button>
+    <button class="ghost small" id="hcAdd" style="padding:0;align-self:flex-start">Добавить команду заново</button>
     <details><summary class="small"><b>Чтобы приходило само каждый вечер</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
       <li>Приложение «Команды» → внизу «Автоматизация» → «+».</li>
       <li>«Время суток» → например 21:30, «Ежедневно» → «Запускать сразу» → «Далее».</li>
@@ -2347,7 +2353,9 @@ function bindIntegrations(){
     switch(b.id){
       case "openSafari": openExternal(APP_URL+"?install=1"); break;
       case "loginGo": startLogin(); break;
-      case "hcAdd": openExternal(HEALTH_SC); break;
+      case "hcAdd": hcConnect(); break;
+      case "hcConnect": hcConnect(); break;
+      case "hcHave": hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} break;
       case "hcRun": runHealthShortcut(); break;
       case "loginCancel": clearInterval(loginTimer); loginNonce=null; renderLoginCard(); break;
       case "logoutBtn": logout(); break;
