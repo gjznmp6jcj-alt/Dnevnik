@@ -315,7 +315,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 15</p>
+    <p class="note">Версия приложения: 2026-10-25 · 16</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1220,11 +1220,18 @@ function openSheet2(inner){
 }
 function closeSheet2(){ if(scanStop){ try{ scanStop(); }catch(e){} scanStop=null; } $("sheetRoot2").innerHTML=""; }
 let scanStop=null;
-async function fetchJSON(url,ms=15000){
-  const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),ms);
-  try{ const r=await fetch(url,{signal:ctl.signal,method:method||"GET"}); if(r.status===404) return null; if(!r.ok) throw new Error("http "+r.status); return await r.json(); }
-  finally{ clearTimeout(t); }
+async function fetchJSON(url,ms=15000,tries=2){
+  let last;
+  for(let i=0;i<tries;i++){
+    const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),ms);
+    try{ const r=await fetch(url,{signal:ctl.signal,cache:"no-store"}); if(r.status===404) return null; if(!r.ok) throw new Error("ответ сервера "+r.status); return await r.json(); }
+    catch(e){ last = e.name==="AbortError" ? new Error("нет ответа "+Math.round(ms/1000)+" с") : e; }
+    finally{ clearTimeout(t); }
+    if(i<tries-1) await new Promise(r=>setTimeout(r,700));
+  }
+  throw last;
 }
+const errText=e=>e? String(e.message||e).replace(/^TypeError:\s*/,"") : "";
 function offToFood(p){
   if(!p) return null; const n=p.nutriments||{};
   let kcal=n["energy-kcal_100g"]; if((kcal==null||kcal==="") && n["energy_100g"]!=null) kcal=n["energy_100g"]/4.184;
@@ -1251,11 +1258,7 @@ async function offSearch(q){
     return outRu.concat(outOther);
   }
   err=(ru.reason||all.reason);
-  try{
-    const j=await fetchJSON(`${OFF}/api/v2/search?search_terms=${encodeURIComponent(q)}&page_size=30&fields=${OFF_FIELDS}`);
-    if(j&&Array.isArray(j.products)) return j.products.map(offToFood).filter(ok);
-  }catch(e){ err=err||e; }
-  throw err||new Error("no results endpoint");
+  throw new Error(errText(err)||"поиск недоступен");
 }
 async function offByCode(code){
   const j=await fetchJSON(`${OFF}/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`);
@@ -1303,7 +1306,7 @@ function openOnlineSearch(q,onPick){
       if(!$("osRes")) return;
       $("osRes").innerHTML = res.length ? `<div class="plist" style="max-height:none">${res.map((f,i)=>`<button type="button" data-osi="${i}"><span>${esc(f.name)}${f.qty?` <span class="small muted">${esc(f.qty)}</span>`:""}${f.ru?' <span class="tag">RU</span>':""}</span><small class="num">${fmt(f.kcal)} ккал</small></button>`).join("")}</div>`
         : `<div class="empty">Ничего не нашлось. Попробуй короче или по-другому, например без бренда.</div>`;
-    }catch(e){ if($("osRes")) $("osRes").innerHTML=`<div class="empty">Не получилось подключиться к базе продуктов. Скорее всего, у тебя она открывается только через VPN — включи его и попробуй снова.</div>`; }
+    }catch(e){ if($("osRes")) $("osRes").innerHTML=`<div class="empty">Поиск по названию сейчас не отвечает: у тебя его, похоже, не пропускает VPN или сервер поиска временно недоступен. Отсканируй <b>штрихкод</b> или сфотографируй <b>этикетку</b> — это работает.<div class="small muted" style="margin-top:6px">Причина: ${esc(errText(e))}</div></div>`; }
   };
   $("osGo").onclick=run; $("osQ").onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); run(); } };
   $("osRes").addEventListener("click",e=>{ const b=e.target.closest("[data-osi]"); if(b) openFoodConfirm(res[+b.dataset.osi],onPick); });
@@ -1390,7 +1393,7 @@ function openScanner(onPick){
       if(f&&f.name&&f.kcal!=null) openFoodConfirm(f,onPick,"Нашёлся в базе. Проверь цифры с упаковкой и сохрани — в следующий раз он найдётся мгновенно.");
       else if(f&&f.name) openFoodConfirm(f,onPick,"Продукт есть в базе, но без калорийности. Сфотографируй этикетку с КБЖУ или впиши цифры один раз.");
       else openFoodConfirm({name:"",kcal:null,code},onPick,`Штрихкода ${code} нет в базе. Сфотографируй этикетку с КБЖУ кнопкой ниже или впиши цифры — один раз, дальше он будет находиться сам.`);
-    }catch(e){ msg("Не получилось подключиться к базе продуктов — похоже, она открывается только через VPN. Включи VPN и нажми «Найти» ещё раз, или впиши данные с упаковки: <button class=\"ghost\" id=\"scManual\" style=\"padding:0\">ввести вручную</button>"); const mb=$("scManual"); if(mb) mb.onclick=()=>openFoodConfirm({name:"",kcal:null,code},onPick,`Штрихкод ${code} сохранится вместе с продуктом — в следующий раз найдётся сам, без интернета.`); }
+    }catch(e){ msg(`<span class="small muted">Причина: ${esc(errText(e))}</span><br>`+"Не получилось подключиться к базе продуктов — похоже, она открывается только через VPN. Включи VPN и нажми «Найти» ещё раз, или впиши данные с упаковки: <button class=\"ghost\" id=\"scManual\" style=\"padding:0\">ввести вручную</button>"); const mb=$("scManual"); if(mb) mb.onclick=()=>openFoodConfirm({name:"",kcal:null,code},onPick,`Штрихкод ${code} сохранится вместе с продуктом — в следующий раз найдётся сам, без интернета.`); }
   };
   $("scFind").onclick=()=>handle($("scCode").value);
   $("scCode").onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); handle($("scCode").value); } };
