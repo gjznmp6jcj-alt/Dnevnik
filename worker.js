@@ -61,6 +61,7 @@ export default {
       if (url.pathname === "/setup") return await setup(req, env, url);
       if (url.pathname === "/tg" && req.method === "POST") return await onTelegram(req, env, ctx);
       if (url.pathname.startsWith("/f/")) return await serveFile(env, url);
+      if (url.pathname === "/h") return await healthIn(req, env, url);
       if (url.pathname === "/api/login/start") return cors(await loginStart(env), req);
       if (url.pathname === "/api/login/check") return cors(await loginCheck(env, url), req);
       if (url.pathname.startsWith("/api/")) {
@@ -248,7 +249,7 @@ async function api(req, env, url, user, ctx) {
   if (p === "data" && req.method === "GET") {
     const pre = `u:${user.id}:d:`, rows = await env.KV.listPrefix(pre), docs = {};
     for (const [k, v] of rows) { try { docs[k.slice(pre.length)] = JSON.parse(v); } catch (e) {} }
-    return json({ docs, me: { id: user.id, name: user.name } });
+    return json({ docs, me: { id: user.id, name: user.name }, health: await kget(env, `hp:${user.id}`) });
   }
   if (p === "data") {   // {docs:{key:{v,at}}} — побеждает более свежая запись
     const pre = `u:${user.id}:d:`, incoming = body.docs || {}, keys = Object.keys(incoming).filter(k => /^[A-Za-z0-9_\-]{1,64}$/.test(k)).slice(0, 400);
@@ -262,6 +263,11 @@ async function api(req, env, url, user, ctx) {
     }
     if (write.length) await env.KV.putMany(write);
     return json({ ok: true, accepted, newer });
+  }
+  if (p === "health/key") {   // личный ключ для быстрой команды «Здоровье»
+    let k = await env.KV.get(`uhk:${user.id}`);
+    if (!k) { k = rid(20); await env.KV.put(`hk:${k}`, user.id); await env.KV.put(`uhk:${user.id}`, k); }
+    return json({ key: k });
   }
   if (p === "logout") { if (user.session) await env.KV.delete(`sess:${user.session}`); return json({ ok: true }); }
   if (p === "ai/photo") return await aiPhoto(env, user, body);
@@ -281,6 +287,23 @@ async function api(req, env, url, user, ctx) {
   }
   if (p.startsWith("family")) return await family(env, user, p, body, req);
   return json({ error: "unknown" }, 404);
+}
+
+/* ---------------- «Здоровье»: данные от быстрой команды iPhone ---------------- */
+const hnum = v => { if (v == null) return 0; const m = String(v).replace(/[\s\u00a0\u202f]/g, "").replace(",", ".").match(/-?\d+(?:\.\d+)?/); return m ? +m[0] : 0; };
+async function healthIn(req, env, url) {
+  let b = {};
+  if (req.method === "POST") { const t = await req.text(); try { b = JSON.parse(t) || {}; } catch (e) { b = Object.fromEntries(new URLSearchParams(t)); } }
+  const g = k => (b[k] != null && b[k] !== "") ? b[k] : url.searchParams.get(k);
+  const key = String(g("k") || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const uid = key ? await env.KV.get(`hk:${key}`) : null;
+  if (!uid) return text("❌ Дневник не узнал тебя. Открой дневник → «Профиль» → «Здоровье» → «Обновить из Здоровья».");
+  const s = await userSettings(env, uid), date = localDate(new Date(), s.tz);
+  const steps = Math.max(0, Math.round(hnum(g("s")))), active = Math.max(0, Math.round(hnum(g("a"))));
+  let w = hnum(g("w")); w = (w > 20 && w < 400) ? Math.round(w * 10) / 10 : null;
+  await kput(env, `hp:${uid}`, { date, steps, active, w, at: Date.now() });
+  const parts = []; if (steps) parts.push(`${fmt(steps)} шагов`); if (active) parts.push(`${fmt(active)} ккал активности`); if (w) parts.push(`вес ${fmt1(w)} кг`);
+  return text(parts.length ? `✅ В дневник: ${parts.join(", ")}` : "⚠️ Из «Здоровья» ничего не пришло. Разреши команде доступ к шагам, энергии и весу: «Настройки» → «Здоровье» → «Доступ к данным».");
 }
 
 async function serveFile(env, url) {

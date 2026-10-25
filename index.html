@@ -349,7 +349,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 18</p>
+    <p class="note">Версия приложения: 2026-10-25 · 19</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -708,7 +708,7 @@ function renderDiary(){
     </div>
     <div class="macros">
       ${mac("Белки",t.p,c?.p,"var(--prot)")}${mac("Жиры",t.f,c?.f,"var(--fat)")}${mac("Углеводы",t.c,c?.c,"var(--carb)")}
-    </div>`;
+    </div>${healthDiaryBtn()}`;
   // приёмы пищи
   const day=getDay(curDate);
   const html = MEALS.map(m=>{
@@ -1468,6 +1468,12 @@ async function runDiag(){
     ["Русский язык (≈10 МБ)","https://cdn.jsdelivr.net/npm/@tesseract.js-data/rus/4.0.0_best_int/rus.traineddata.gz","HEAD"]
   ];
   const lines=[`Telegram: ${TG?"да, версия "+(TG.version||"?")+", "+(TG.platform||"?"):"нет"}`];
+  if(SERVER){
+    lines.push(serverReady()?`Вход: ${TG?"через Telegram":"✅ "+((sessionUser&&sessionUser.name)||"выполнен")}`:"Вход: ❌ не выполнен — нажми «Войти через Telegram»");
+    if(serverReady()){ const t0=Date.now(); try{ const j=await offViaServer("search","молоко"); lines.push(`✅ Поиск через сервер: ${(j&&j.hits||[]).length} продуктов, ${Date.now()-t0} мс`); }catch(e){ lines.push(`❌ Поиск через сервер: ${errText(e)}`); } }
+    lines.push("Ниже — прямые адреса базы. Без VPN в России крестики там — это нормально, поиск идёт через сервер.");
+    out.textContent=lines.join("\n");
+  }
   for(const [name,url,method] of tests){
     const t0=Date.now();
     try{ const ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),15000); const r=await fetch(url,{signal:ctl.signal,method:method||"GET"}); clearTimeout(tm); lines.push(`${r.ok?"✅":"⚠️"} ${name}: ответ ${r.status}, ${Date.now()-t0} мс`); }
@@ -1967,9 +1973,9 @@ function checkStartParam(){
 }
 
 /* ================= ИНТЕГРАЦИИ И СЕРВЕР ================= */
-let SERVER="", serverInfo=null, famState=null, famPoll=null;
+let SERVER="", HEALTH_SC="", serverInfo=null, famState=null, famPoll=null;
 async function loadConfig(){
-  try{ const r=await fetch("config.json",{cache:"no-store"}); if(r.ok){ const j=await r.json(); SERVER=String(j.server||"").trim().replace(/\/+$/,""); } }catch(e){}
+  try{ const r=await fetch("config.json",{cache:"no-store"}); if(r.ok){ const j=await r.json(); SERVER=String(j.server||"").trim().replace(/\/+$/,""); HEALTH_SC=String(j.healthShortcut||"").trim(); } }catch(e){}
   try{ const o=localStorage.getItem("serverOverride"); if(o) SERVER=o.trim().replace(/\/+$/,""); }catch(e){}
 }
 const serverReady=()=>!!(SERVER && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
@@ -2021,6 +2027,56 @@ function applyHealth(sp){
   curDate=date; go("diary");
   toast(parts.length?"Из «Здоровья»: "+parts.join(", "):"Из «Здоровья» пришли пустые данные");
 }
+const SC_NAME="Дневник Здоровье";
+let healthWait=0;
+function applyHealthData(h){
+  if(!h||!/^\d{4}-\d{2}-\d{2}$/.test(h.date||"")||!h.at) return false;
+  const day=clone(getDay(h.date)); if(day.health&&(day.health.at||0)>=h.at) return false;
+  day.health={steps:+h.steps||0,active:+h.active||0,at:h.at}; putDay(h.date,day);
+  const parts=[]; if(h.steps) parts.push(`${fmt(h.steps)} шагов`); if(h.active) parts.push(`${fmt(h.active)} ккал активности`);
+  const kg=+h.w||0;
+  if(kg>20&&kg<400){ const entries=weights().filter(x=>x.date!==h.date); const old=weights().find(x=>x.date===h.date); entries.push({date:h.date,w:kg,...(old&&old.waist?{waist:old.waist}:{})}); Store.set("weights",{entries}); parts.push(`вес ${fmt(kg,1)} кг`); }
+  try{ renderAll(); }catch(e){}
+  toast(parts.length?"Из «Здоровья»: "+parts.join(", "):"Из «Здоровья» пришли пустые данные — проверь доступ команды к «Здоровью»");
+  return true;
+}
+async function runHealthShortcut(){
+  if(!serverReady()){ toast(TG?"Сервер не подключён":"Сначала войди через Telegram"); return; }
+  try{
+    const r=await sapi("health/key",{});
+    healthWait=Date.now()+180000;
+    location.href=`shortcuts://run-shortcut?name=${encodeURIComponent(SC_NAME)}&input=text&text=${encodeURIComponent(r.key)}`;
+  }catch(e){ toast("Не получилось: "+errText(e)); }
+}
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden||Date.now()>healthWait||!serverReady()) return;
+  [700,2500,6000].forEach(t=>setTimeout(()=>{ Sync.lastPull=0; Sync.pull(); },t));
+});
+function healthDiaryBtn(){
+  if(!HEALTH_SC||!serverReady()||curDate!==today()) return "";
+  return `<button class="ghost small" id="hcRun" style="margin-top:6px;padding:6px 0">↻ Обновить шаги из «Здоровья»</button>`;
+}
+function healthCardHtml(){
+  const intro=`<p class="note" style="margin:0">Шаги, активные калории и сегодняшний вес — из «Здоровья», часов и умных весов.</p>`;
+  if(!SERVER) return intro+HEALTH_GUIDE;
+  if(!serverReady()) return intro+`<p class="note" style="margin:0">Войди через Telegram — и подключить «Здоровье» можно будет в два нажатия.</p>`;
+  if(!HEALTH_SC) return intro+`<p class="note" style="margin:0">Скоро здесь будет подключение в два нажатия.</p>`+HEALTH_BUILD()+`<button id="hcRun">Проверить команду</button>`;
+  return intro+`
+    <div class="small"><b>1.</b> Один раз добавь команду — нажми кнопку, потом «Добавить быструю команду».</div>
+    <button id="hcAdd">Добавить команду</button>
+    <div class="small"><b>2.</b> Подтяни данные. В первый раз айфон спросит доступ к «Здоровью» — нажми «Разрешить». Потом вернись сюда.</div>
+    <button class="primary" id="hcRun">Обновить из «Здоровья»</button>
+    <details><summary class="small"><b>Чтобы приходило само каждый вечер</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
+      <li>Приложение «Команды» → внизу «Автоматизация» → «+».</li>
+      <li>«Время суток» → например 21:30, «Ежедневно» → «Запускать сразу» → «Далее».</li>
+      <li>Выбери команду «${SC_NAME}». Готово.</li>
+    </ol><p class="note" style="margin:0">Сначала хотя бы раз нажми «Обновить из „Здоровья“» — так команда запомнит, что данные твои.</p></details>`;
+}
+const HEALTH_BUILD=()=>`<details><summary class="small"><b>Собрать команду (делается один раз — потом все добавляют её в одно нажатие)</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
+<li>Открой «Команды» → «+» → назови команду ровно <b>${SC_NAME}</b>.</li>
+<li>Действия по порядку — инструкция у Claude в чате.</li>
+<li>Адрес для действия «Получить содержимое URL»: <code>${esc(SERVER)}/h</code></li>
+</ol></details>`;
 const HEALTH_GUIDE=`<details><summary><b>Как настроить (5 минут)</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
 <li>Открой приложение <b>«Команды»</b> → «+» → назови команду «Дневник».</li>
 <li>Добавь действие <b>«Найти образцы здоровья»</b>: Тип — <b>Шаги</b>, Дата начала — <b>Сегодня</b>. Затем действие <b>«Вычислить статистику»</b> → <b>Сумма</b>.</li>
@@ -2262,7 +2318,7 @@ function renderServerCards(){
   const s=serverInfo&&serverInfo.settings;
   el.innerHTML=`
     ${TG?`<div class="card stack"><h2>Отдельное приложение на экране</h2><p class="note" style="margin:0">Чтобы дневник открывался с главного экрана сам, без Telegram: открой его в Safari, нажми «Поделиться» → «На экран „Домой“», а потом войди через Telegram — записи будут те же.</p><button class="primary" id="openSafari">Открыть в Safari</button></div>`:""}
-    <div class="card stack"><h2>«Здоровье» на iPhone</h2><p class="note" style="margin:0">Шаги, активные калории и вес — из «Здоровья», часов и умных весов, автоматически каждый вечер.</p>${HEALTH_GUIDE}</div>
+    <div class="card stack"><h2>«Здоровье» на iPhone</h2>${healthCardHtml()}</div>
     <div class="card stack"><h2>Выгрузка</h2><p class="note" style="margin:0">Дневник, итоги по дням, вес и тренировки одним файлом — откроется в Excel или «Таблицах».</p><button id="csvBtn">Выгрузить в Excel</button><div class="note" id="csvMsg"></div></div>
     <div class="card stack"><h2>Сервер и бот</h2>
       ${!TG&&!SERVER?`<p class="note" style="margin:0">Сервер не подключён.</p>`
@@ -2291,6 +2347,8 @@ function bindIntegrations(){
     switch(b.id){
       case "openSafari": openExternal(APP_URL+"?install=1"); break;
       case "loginGo": startLogin(); break;
+      case "hcAdd": openExternal(HEALTH_SC); break;
+      case "hcRun": runHealthShortcut(); break;
       case "loginCancel": clearInterval(loginTimer); loginNonce=null; renderLoginCard(); break;
       case "logoutBtn": logout(); break;
       case "csvBtn": deliverFile(`Дневник ${today()}.csv`,"text/csv;charset=utf-8",buildCSV(),{msgEl:"csvMsg",hint:"Файл готов — открой его в «Файлах» или Excel."}); break;
@@ -2356,6 +2414,7 @@ const Sync={
     try{
       const r=await sapi("data"), remote=(r&&r.docs)||{};
       this.apply(remote);
+      if(r&&r.health) try{ applyHealthData(r.health); }catch(e){}
       for(const k of Object.keys(Store.docs)){ const ra=remote[k]?remote[k].at:-1, la=docAt[k]||(remote[k]?0:1); if(la>ra){ if(!docAt[k]) docAt[k]=Date.now(); this.pending[k]=1; } }
       saveAt(); this.ready=true; this.lastPull=Date.now(); this.status(true); await this.push();
     }catch(e){ this.status(false); if(e&&e.code===401) onSessionLost(); }
