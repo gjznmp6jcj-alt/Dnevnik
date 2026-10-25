@@ -57,6 +57,11 @@ h2{font-family:var(--display);font-weight:500;font-size:15px;letter-spacing:.01e
 .row>*{min-width:0}
 .grow{flex:1 1 0}
 .stack>label.f{flex:none}
+.croproot{position:fixed;inset:0;z-index:70;background:#0b0f0c;color:#e6eee7;display:flex;flex-direction:column;padding:calc(10px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));gap:10px}
+.cropbar{display:flex;flex-direction:column;gap:4px;text-align:center}.cropbar .small{color:#9aa99e}
+.cropwrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.cropcv{touch-action:none;max-width:100%;max-height:100%;border-radius:8px}
+.cropbtns button{background:#222d25;color:#e6eee7}.cropbtns button.primary{background:#6FC195;color:#0e1a13}
 .labelbtn{display:block;text-align:center;background:var(--surface2);color:var(--fg);border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
 details{margin-top:6px;color:var(--muted)}details summary{cursor:pointer}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em;flex:1 1 120px;min-width:0}
@@ -203,6 +208,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
         <button id="fScan" aria-label="Сканировать штрихкод">Штрихкод</button>
         <button id="fLabel" aria-label="Сфотографировать этикетку">Этикетка</button>
       </div>
+      <button class="ghost" id="pasteShare" style="align-self:flex-start;padding-left:0">Вставить, что прислали</button>
       <div id="dishWrap" hidden><div class="note" style="margin-bottom:6px">Мои блюда</div><div class="chips" id="dishChips"></div></div>
       <div id="recentWrap" hidden><div class="note" style="margin-bottom:6px">Недавние</div><div class="chips" id="recent"></div></div>
     </div>
@@ -309,7 +315,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 12</p>
+    <p class="note">Версия приложения: 2026-10-25 · 15</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -678,7 +684,7 @@ function renderDiary(){
         <div class="k">${fmt(x.kcal*x.g/100)}</div>
         <button class="icon" data-del="${x.id}" aria-label="Удалить ${esc(x.name)}">✕</button>
       </div>`).join("")}${pend.length?`<div class="planhdr"><span>ПО ПЛАНУ · ${fmt(planTotals(pend).kcal)} ккал</span>${pend.length>1?`<button class="ghost" data-eatall="${m}">✓ Съела всё</button>`:""}</div>${pend.map(e=>`
-      <div class="item plan"><div class="n">${esc(e.name)}<small class="num">${e.ing&&e.portionG?fmt(e.g/e.portionG,1).replace(",0","")+" порц.":"в меню"}</small></div><div class="g">${fmt(e.g)} г</div><div class="k">${fmt(e.kcal*e.g/100)}</div><button class="eat" data-eat="${e.id}" aria-label="Съела: ${esc(e.name)}">✓</button></div>`).join("")}`:""}</div>`;
+      <div class="item plan"><div class="n">${esc(e.name)}<small class="num">${e.ing&&e.portionG?fmt(e.g/e.portionG,1).replace(",0","")+" порц.":"в меню"}</small></div><div class="g">${fmt(e.g)} г</div><div class="k">${fmt(e.kcal*e.g/100)}</div><button class="eat" data-eat="${e.id}" aria-label="Съела: ${esc(e.name)}">✓</button></div>`).join("")}`:""}${items.length?`<button class="ghost small" data-mshare="${m}" style="padding:8px 0 0">Отправить семье</button>`:""}</div>`;
   }).join("");
   $("meals").innerHTML = html || `<div class="empty">За этот день пока ничего не записано и не запланировано. Выбери приём пищи, введи продукт и вес — калории посчитаются сами.</div>`;
   // недавние
@@ -929,42 +935,66 @@ const CYR2LAT={"а":"a","с":"c","е":"e","о":"o","р":"p","х":"x","к":"k","�
 const NUM="(\\d{1,4}(?:[.,]\\d{1,2})?)";
 function labelNum(s){ return parseFloat(String(s).replace(",",".")); }
 function parseNutrition(raw){
-  let t=String(raw||"").toLowerCase().replace(/\r/g," ").replace(/[ \t]+/g," ");
-  // типичные ошибки OCR внутри чисел: o→0, l/i→1, з→3 рядом с цифрами
-  t=t.replace(/(\d)[oо](?=\d|[.,\s]|г|g)/g,"$10").replace(/(\d)[,.]\s+(\d)/g,"$1,$2").replace(/(\d)\s*[lі|](?=\d)/g,"$11");
-  const cy=t.replace(/[a-z]/g,ch=>LAT2CYR[ch]||ch);   // для русских слов
-  const la=t.replace(/[а-яё]/g,ch=>CYR2LAT[ch]||ch);  // для латиницы
-  const grab=(src,re)=>{ const m=src.match(re); return m? labelNum(m[m.length-1]) : null; };
-  const first=(...vals)=>vals.find(v=>v!=null&&!isNaN(v));
+  let t=String(raw||"").toLowerCase().replace(/\r/g,"");
+  t=t.replace(/[-‐‑–]\s*\n\s*/g,"").replace(/[ \t]+/g," ");            // переносы слов
+  t=t.replace(/[–—−]/g,"-");
+  // типичные ошибки OCR в числах
+  t=t.replace(/(\d)[oо](?=\d|[.,\s]|г|g)/g,"$10")
+     .replace(/(^|[\s\-:])[зЗ](?=[\d,.\/])/g,"$13")                       // «З,1» → «3,1»
+     .replace(/(\d)\s?[зЗ](\d)/g,"$1,$2")                                 // «3З1» → «3,1»
+     .replace(/(\d)\/(\d{1,2})(?=\s*[гgr]\b|\s*[гgr][\s.,;])/g,"$1,$2")    // «3/1 г» → «3,1 г»
+     .replace(/(\d)[,.]\s+(\d)(?=\s*[гgr])/g,"$1,$2")
+     .replace(/(\d)\s*[lі|](?=\d)/g,"$11");
+  // ищем после слов «пищевая ценность», чтобы не взять «массовая доля жира» из названия
+  const startRe=/(ценност|пищев|nutrition|n[äa]hrwert|valeurs nutri|valori nutri|wartość od|warto[sś][cć] od|informaci[oó]n nutri|per 100)/i;
+  const si=t.search(startRe); const body= si>0 ? t.slice(si) : t;
+  const mk=src=>({cy:src.replace(/[a-z]/g,ch=>LAT2CYR[ch]||ch), la:src.replace(/[а-яё]/g,ch=>CYR2LAT[ch]||ch)});
+  const B=mk(body), A=mk(t);
+  const grab=(src,re)=>{ const m=src.match(re); return m? {v:labelNum(m[m.length-1]),raw:m[m.length-1]} : null; };
+  const first=(...vals)=>vals.find(v=>v&&!isNaN(v.v));
   const gap="[^\\d\\n]{0,28}?";
-  const out={};
-  // калории
-  let kcal=first(
-    grab(cy, new RegExp("кдж\\s*/\\s*ккал"+gap+"\\d{2,4}(?:[.,]\\d)?\\s*/\\s*"+NUM)),
-    grab(la, new RegExp("kj\\s*/\\s*kcal"+gap+"\\d{2,4}(?:[.,]\\d)?\\s*/\\s*"+NUM)),
-    (()=>{ const m=cy.match(new RegExp("ккал\\s*/\\s*кдж"+gap+NUM)); return m?labelNum(m[1]):null; })(),
-    (()=>{ const m=la.match(new RegExp("kcal\\s*/\\s*kj"+gap+NUM)); return m?labelNum(m[1]):null; })(),
-    grab(cy, new RegExp(NUM+"\\s*ккал")),
-    grab(la, new RegExp(NUM+"\\s*k\\s?cal")),
-    grab(cy, new RegExp("(?:калорийност|энергетическ)\\S*"+gap+NUM+"(?!\\s*кдж)")),
-  );
-  if(kcal==null){ const kj=first(grab(cy,new RegExp(NUM+"\\s*кдж")), grab(la,new RegExp(NUM+"\\s*kj"))); if(kj!=null) kcal=kj/4.184; }
-  // белки / жиры / углеводы — первое число после ключевого слова
-  const p=first(grab(cy,new RegExp("(?:белк|белок|протеин)\\S*"+gap+NUM)),
-    grab(la,new RegExp("(?:protein|proteine|protéines|proteines|proteínas|proteinas|proteine|eiwei|eiweiss|bia[lł]k|bilkovin|bílkovin|feh[eé]rje)\\S*"+gap+NUM)));
-  const f=first(grab(cy,new RegExp("(?:^|[^а-я])жир\\S*"+gap+NUM)),
-    grab(la,new RegExp("(?:^|[^a-z])(?:fat|fats|total fat|fett|lipides|mati[eè]res grasses|grassi|grasas|gorduras|t[lł]uszcz|tuky|tuk|zs[ií]r|vet)\\b\\S*"+gap+NUM)));
-  const c=first(grab(cy,new RegExp("углевод\\S*"+gap+NUM)),
-    grab(la,new RegExp("(?:carbohydrate|carbohydrates|total carbohydrate|carbs|kohlenhydrat|glucides|carboidrati|hidratos de carbono|carboidratos|w[eę]glowodan|sacharid|szénhidr[aá]t|koolhydraten)\\S*"+gap+NUM)));
-  out.kcal=kcal!=null?Math.round(kcal):null; out.p=p; out.f=f; out.c=c;
-  // проверка правдоподобия
-  const est=(p||0)*4+(f||0)*9+(c||0)*4;
-  if(out.kcal==null && (p!=null||f!=null||c!=null)) { out.kcal=Math.round(est); out.kcalEstimated=true; }
-  out.warn = [];
-  if(out.kcal!=null && (out.kcal>950)) out.warn.push("калорий больше 900 на 100 г");
-  if((p||0)+(f||0)+(c||0)>101) out.warn.push("сумма Б+Ж+У больше 100 г");
-  if(out.kcal && est && !out.kcalEstimated && Math.abs(est-out.kcal)/out.kcal>0.35) out.warn.push("калории не сходятся с БЖУ — возможно, цифры прочитались неточно или таблица на порцию");
-  out.found=[out.kcal,p,f,c].filter(v=>v!=null).length;
+  const kcalRes=[
+    [new RegExp("кдж\\s*/\\s*ккал"+gap+"\\d{2,4}(?:[.,]\\d)?\\s*/\\s*"+NUM),"cy"],
+    [new RegExp("kj\\s*/\\s*kcal"+gap+"\\d{2,4}(?:[.,]\\d)?\\s*/\\s*"+NUM),"la"],
+    [new RegExp(NUM+"\\s*ккал"),"cy"], [new RegExp(NUM+"\\s*k\\s?cal"),"la"],
+    [new RegExp("ккал\\s*/\\s*кдж"+gap+NUM),"cy1"], [new RegExp("kcal\\s*/\\s*kj"+gap+NUM),"la1"],
+    [new RegExp("(?:калорийност|энергетическ)[a-zа-яёßäöüéèàçłęąśćżźńóíáúñ]*"+gap+NUM+"(?!\\s*кдж)"),"cy"]
+  ];
+  let kcal=null;
+  for(const S of [B,A]){ for(const [re,k] of kcalRes){ const src=k.startsWith("cy")?S.cy:S.la; const m=src.match(re); if(m){ kcal=labelNum(k.endsWith("1")?m[1]:m[m.length-1]); break; } } if(kcal!=null) break; }
+  if(kcal==null){ for(const S of [B,A]){ const kj=first(grab(S.cy,new RegExp(NUM+"\\s*кдж")), grab(S.la,new RegExp(NUM+"\\s*kj"))); if(kj){ kcal=kj.v/4.184; break; } } }
+  const P=S=>first(grab(S.cy,new RegExp("(?:белк|белок|протеин)[a-zа-яёßäöüéèàçłęąśćżźńóíáúñ]*"+gap+NUM)),
+    grab(S.la,new RegExp("(?:protein|proteine|protéines|proteines|proteínas|proteinas|eiwei|eiweiss|bia[lł]k|b[ií]lkovin|feh[eé]rje)[a-zа-яёßäöüéèàçłęąśćżźńóíáúñ]*"+gap+NUM)));
+  const F=S=>first(grab(S.cy,new RegExp("(?:^|[^а-я])жир[а-яё]*"+gap+NUM)),
+    grab(S.la,new RegExp("(?:^|[^a-z])(?:fat|fats|total fat|fett|lipides|mati[eè]res grasses|grassi|grasas|gorduras|t[lł]uszcz|tuky|tuk|zs[ií]r|vet)\\b[a-zàâäçéèêëïîôöùûüÿłęąśćżźńóíáúñ]*"+gap+NUM)));
+  const C=S=>first(grab(S.cy,new RegExp("углевод[а-яё]*"+gap+NUM)),
+    grab(S.la,new RegExp("(?:carbohydrate|carbohydrates|total carbohydrate|carbs|kohlenhydrat|glucides|carboidrati|hidratos de carbono|carboidratos|w[eę]glowodan|sacharid|sz[eé]nhidr[aá]t|koolhydraten)[a-zа-яёßäöüéèàçłęąśćżźńóíáúñ]*"+gap+NUM)));
+  let p=first(P(B),P(A)), f=first(F(B),F(A)), c=first(C(B),C(A));
+  const out={kcal:kcal!=null?Math.round(kcal):null,warn:[],fixed:[]};
+  const est=()=>(p?p.v:0)*4+(f?f.v:0)*9+(c?c.v:0)*4;
+  // потерянная запятая: «25» вместо «2,5» — выбираем вариант, который сходится с калориями
+  if(out.kcal){
+    const items=[p,f,c].filter(x=>x && !/[.,]/.test(x.raw) && x.v>=10 && x.v<100);
+    let best={err:Math.abs(est()-out.kcal),mask:0};
+    for(let mask=1; mask<(1<<items.length); mask++){
+      items.forEach((x,i)=>{ x.v = (mask>>i)&1 ? labelNum(x.raw)/10 : labelNum(x.raw); });
+      const e=Math.abs(est()-out.kcal); if(e<best.err) best={err:e,mask};
+    }
+    items.forEach((x,i)=>{ x.v = (best.mask>>i)&1 ? labelNum(x.raw)/10 : labelNum(x.raw); if((best.mask>>i)&1) out.fixed.push(x.raw+" → "+String(x.v).replace(".",",")); });
+    // одно значение не прочиталось — досчитываем по калориям
+    const miss=[["p",4],["f",9],["c",4]].filter(([k])=>!({p,f,c})[k]);
+    if(miss.length===1){
+      const [k,mul]=miss[0], rest=out.kcal-est();
+      if(rest>=0 && rest/mul<100){ const v={v:Math.round(rest/mul*10)/10,raw:"",derived:true}; if(k==="p")p=v; if(k==="f")f=v; if(k==="c")c=v; out.derivedKey=k; }
+    }
+  }
+  out.p=p?p.v:null; out.f=f?f.v:null; out.c=c?c.v:null;
+  if(out.kcal==null && (p||f||c)){ out.kcal=Math.round(est()); out.kcalEstimated=true; }
+  const e2=est();
+  if(out.kcal!=null && out.kcal>950) out.warn.push("калорий больше 900 на 100 г");
+  if((out.p||0)+(out.f||0)+(out.c||0)>101) out.warn.push("сумма Б+Ж+У больше 100 г");
+  if(out.kcal && e2 && !out.kcalEstimated && Math.abs(e2-out.kcal)/out.kcal>0.3) out.warn.push("калории не сходятся с БЖУ — возможно, цифры прочитались неточно или таблица на порцию");
+  out.found=[out.kcal,out.p,out.f,out.c].filter(v=>v!=null).length;
   return out;
 }
 
@@ -984,19 +1014,152 @@ function getOcrWorker(lang){
 }
 function warmOcr(){ if(!IN_CLAUDE) getOcrWorker().catch(()=>{}); }
 const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
-async function ocrImageFile(file,onProgress){
-  ocrLogger=onProgress;
-  const url=URL.createObjectURL(file);
-  try{
-    const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
-    const sc=Math.min(1,2000/Math.max(img.naturalWidth,img.naturalHeight)), c=document.createElement("canvas");
-    c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc);
-    const ctx=c.getContext("2d"); ctx.filter="grayscale(1) contrast(1.35)"; ctx.drawImage(img,0,0,c.width,c.height);
-    const w=await withTimeout(getOcrWorker(),180000);
-    const r=await withTimeout(w.recognize(c),90000);
-    return (r&&r.data&&r.data.text)||"";
-  } finally { URL.revokeObjectURL(url); ocrLogger=null; }
+function loadImageFile(file){
+  return new Promise((res,rej)=>{ const url=URL.createObjectURL(file), i=new Image(); i.onload=()=>res({img:i,url}); i.onerror=e=>{ URL.revokeObjectURL(url); rej(e); }; i.src=url; });
 }
+/* выделение области пальцем; возвращает прямоугольник в координатах фото или null */
+function cropPicker(img){
+  return new Promise(resolve=>{
+    const root=document.createElement("div");
+    root.className="croproot";
+    root.innerHTML=`<div class="cropbar"><b>Обведи рамкой блок «Пищевая ценность»</b><span class="small">Проведи пальцем по диагонали. Без кота, штрихкода и картинок — только строки с цифрами.</span></div>
+      <div class="cropwrap"><canvas class="cropcv"></canvas></div>
+      <div class="row cropbtns"><button class="grow" data-c="cancel">Отмена</button><button class="grow" data-c="all">Всё фото</button><button class="primary grow" data-c="ok">Распознать</button></div>`;
+    document.body.appendChild(root);
+    const cv=root.querySelector("canvas"), wrap=root.querySelector(".cropwrap"), ctx=cv.getContext("2d");
+    const W=img.naturalWidth, H=img.naturalHeight;
+    const fit=()=>{ const mw=wrap.clientWidth, mh=wrap.clientHeight; const s=Math.min(mw/W, mh/H); cv.width=Math.round(W*s); cv.height=Math.round(H*s); return s; };
+    let s=fit(), sel=null, start=null;
+    const draw=()=>{ ctx.drawImage(img,0,0,cv.width,cv.height);
+      if(sel){ ctx.fillStyle="rgba(0,0,0,.55)"; ctx.beginPath(); ctx.rect(0,0,cv.width,cv.height); ctx.rect(sel.x,sel.y,sel.w,sel.h); ctx.fill("evenodd");
+        ctx.strokeStyle="#6FC195"; ctx.lineWidth=3; ctx.strokeRect(sel.x,sel.y,sel.w,sel.h); } };
+    draw();
+    const pos=e=>{ const r=cv.getBoundingClientRect(); return {x:Math.max(0,Math.min(cv.width,(e.clientX-r.left)*cv.width/r.width)), y:Math.max(0,Math.min(cv.height,(e.clientY-r.top)*cv.height/r.height))}; };
+    cv.addEventListener("pointerdown",e=>{ e.preventDefault(); cv.setPointerCapture(e.pointerId); start=pos(e); sel={x:start.x,y:start.y,w:0,h:0}; draw(); });
+    cv.addEventListener("pointermove",e=>{ if(!start) return; const p=pos(e); sel={x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),w:Math.abs(p.x-start.x),h:Math.abs(p.y-start.y)}; draw(); });
+    cv.addEventListener("pointerup",()=>{ start=null; if(sel&&(sel.w<15||sel.h<15)) { sel=null; draw(); } });
+    const done=v=>{ root.remove(); resolve(v); };
+    root.addEventListener("click",e=>{ const b=e.target.closest("button[data-c]"); if(!b) return;
+      if(b.dataset.c==="cancel") done(null);
+      else if(b.dataset.c==="all") done({x:0,y:0,w:W,h:H});
+      else { if(!sel){ root.querySelector(".cropbar b").textContent="Сначала обведи пальцем блок с цифрами"; return; } done({x:sel.x/s,y:sel.y/s,w:sel.w/s,h:sel.h/s}); }
+    });
+  });
+}
+/* автоматический поиск блока «Пищевая ценность» и чтение в несколько проходов */
+const LABEL_KW=/(ценн|пищев|белк|белок|жир|углев|ккал|кдж|энерг|nutri|n[äa]hrw|energ|kcal|protein|prot[eé]in|eiwei|fat|fett|lipid|grass|t[lł]uszcz|carbo|kohlenh|glucid|w[eę]glow|bia[lł]k)/i;
+function prepFull(img){
+  const sc=Math.min(1,2000/Math.max(img.naturalWidth,img.naturalHeight)), w=Math.round(img.naturalWidth*sc), h=Math.round(img.naturalHeight*sc);
+  const c=document.createElement("canvas"); c.width=w; c.height=h; const ctx=c.getContext("2d",{willReadFrequently:true});
+  ctx.drawImage(img,0,0,w,h); const id=ctx.getImageData(0,0,w,h), d=id.data, n=w*h, hist=new Uint32Array(256), g=new Uint8ClampedArray(n);
+  for(let i=0;i<n;i++){ const v=(d[i*4]*0.299+d[i*4+1]*0.587+d[i*4+2]*0.114)|0; g[i]=v; hist[v]++; }
+  let lo=0,hi=255,acc=0; const cut=n*0.02; for(lo=0;lo<255&&(acc+=hist[lo])<cut;lo++); acc=0; for(hi=255;hi>0&&(acc+=hist[hi])<cut;hi--);
+  const span=Math.max(1,hi-lo); for(let i=0;i<n;i++){ const v=Math.max(0,Math.min(255,(g[i]-lo)*255/span)); d[i*4]=d[i*4+1]=d[i*4+2]=v; }
+  ctx.putImageData(id,0,0); return {canvas:c,scale:sc};
+}
+function flattenWords(data){
+  if(data&&Array.isArray(data.words)&&data.words.length) return data.words;
+  const out=[]; ((data&&data.blocks)||[]).forEach(b=>(b.paragraphs||[]).forEach(p=>(p.lines||[]).forEach(l=>(l.words||[]).forEach(w=>out.push(w))))); return out;
+}
+function combineParses(rs){
+  const ks=rs.map(r=>r.kcal).filter(v=>v!=null&&!rs.find(r=>r.kcal===v&&r.kcalEstimated));
+  const mode=a=>{ const m=new Map(); a.forEach(v=>m.set(v,(m.get(v)||0)+1)); let best=null,bc=0; m.forEach((c,v)=>{ if(c>bc){bc=c;best=v;} }); return best; };
+  const kcal=mode(ks);
+  const cand=k=>{ const s=[...new Set(rs.map(r=>r[k]).filter(v=>v!=null))]; return s.length?s:[null]; };
+  const P=cand("p"),F=cand("f"),C=cand("c");
+  let best=null;
+  for(const p of P) for(const f of F) for(const c of C){
+    const o={kcal,p,f,c,derivedKey:null};
+    const miss=[["p",4],["f",9],["c",4]].filter(([k])=>o[k]==null);
+    if(kcal!=null && miss.length===1){ const [k,mul]=miss[0]; const rest=kcal-(o.p||0)*4-(o.f||0)*9-(o.c||0)*4; if(rest>=0&&rest/mul<100){ o[k]=Math.round(rest/mul*10)/10; o.derivedKey=k; } }
+    const est=(o.p||0)*4+(o.f||0)*9+(o.c||0)*4;
+    const err = kcal? Math.abs(est-kcal)/kcal : 0;
+    const filled=[o.p,o.f,o.c].filter(v=>v!=null).length;
+    const score= filled*10 - err*20 - (o.derivedKey?2:0);
+    if(!best||score>best.score) best={...o,score,err};
+  }
+  // все три есть, но не сходятся с калориями — одно значение прочитано неверно: досчитываем его
+  if(best && kcal && best.err>0.25 && best.p!=null && best.f!=null && best.c!=null){
+    const opts=[["p",4],["f",9],["c",4]].map(([k,mul])=>{ const rest=kcal-["p","f","c"].filter(x=>x!==k).reduce((s,x)=>s+best[x]*(x==="f"?9:4),0); return {k,v:rest/mul}; }).filter(o=>o.v>=0&&o.v<100);
+    if(opts.length){ opts.sort((a,b)=>Math.abs(a.v-best[a.k])/Math.max(1,best[a.k]) - Math.abs(b.v-best[b.k])/Math.max(1,best[b.k])); const o=opts[0]; best[o.k]=Math.round(o.v*10)/10; best.derivedKey=o.k; best.err=0; }
+  }
+  const out={kcal:best?best.kcal:null,p:best?best.p:null,f:best?best.f:null,c:best?best.c:null,derivedKey:best&&best.derivedKey,warn:[],fixed:[...new Set(rs.flatMap(r=>r.fixed||[]))]};
+  if(out.kcal==null && (out.p!=null||out.f!=null||out.c!=null)){ out.kcal=Math.round((out.p||0)*4+(out.f||0)*9+(out.c||0)*4); out.kcalEstimated=true; }
+  if(best && best.err>0.3) out.warn.push("калории не сходятся с БЖУ — проверь цифры, возможно, таблица на порцию");
+  out.found=[out.kcal,out.p,out.f,out.c].filter(v=>v!=null).length;
+  return out;
+}
+async function ocrAuto(img,onProgress){
+  ocrLogger=onProgress;
+  try{
+    const w=await withTimeout(getOcrWorker(),180000);
+    const full=prepFull(img);
+    try{ await w.setParameters({tessedit_pageseg_mode:"11"}); }catch(e){}
+    onProgress&&onProgress({status:"stage",stage:"find"});
+    const r1=await withTimeout(w.recognize(full.canvas,{},{text:true,blocks:true}),90000);
+    const words=flattenWords(r1.data).filter(x=>x&&x.text&&x.bbox);
+    const hits=words.filter(x=>LABEL_KW.test(x.text));
+    const texts=[r1.data.text||""];
+    let rect=null;
+    if(hits.length>=2){
+      const x0=Math.min(...hits.map(h=>h.bbox.x0)), y0=Math.min(...hits.map(h=>h.bbox.y0)), x1=Math.max(...hits.map(h=>h.bbox.x1)), y1=Math.max(...hits.map(h=>h.bbox.y1));
+      const hs=hits.map(h=>h.bbox.y1-h.bbox.y0).sort((a,b)=>a-b), lh=hs[hs.length>>1]||20, pw=(x1-x0)*0.15;
+      const W=full.canvas.width, H=full.canvas.height;
+      const fx0=Math.max(0,x0-pw), fy0=Math.max(0,y0-lh*1.5), fx1=Math.min(W,x1+pw), fy1=Math.min(H,y1+lh*1.5);
+      rect={x:fx0/full.scale,y:fy0/full.scale,w:(fx1-fx0)/full.scale,h:(fy1-fy0)/full.scale};
+      try{ await w.setParameters({tessedit_pageseg_mode:"6"}); }catch(e){}
+      onProgress&&onProgress({status:"stage",stage:"read"});
+      for(const [target,off] of [[1400,18],[1800,18],[1800,12]]){
+        const t=(await withTimeout(w.recognize(prepLabelCanvas(img,rect,true,target,off)),90000)).data.text||"";
+        texts.push(t);
+        const cur=combineParses(texts.map(x=>parseNutrition(x)));
+        if(cur.found===4 && !cur.warn.length && !cur.derivedKey && texts.length>=3) break;
+      }
+    }
+    const res=combineParses(texts.map(x=>parseNutrition(x)));
+    return {r:res,text:texts.slice(1).join("\n— — —\n")||texts[0],located:!!rect};
+  } finally { ocrLogger=null; }
+}
+
+/* увеличение, контраст и «очистка» фона (адаптивный порог) */
+function prepLabelCanvas(img,rect,threshold,target,offset){
+  target=target||1800; offset=offset==null?12:offset;
+  const sc=Math.max(1,Math.min(4,target/rect.w)), w=Math.round(rect.w*sc), h=Math.round(rect.h*sc);
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const ctx=c.getContext("2d",{willReadFrequently:true}); ctx.imageSmoothingQuality="high";
+  ctx.drawImage(img,rect.x,rect.y,rect.w,rect.h,0,0,w,h);
+  const id=ctx.getImageData(0,0,w,h), d=id.data, n=w*h, g=new Uint8ClampedArray(n);
+  const hist=new Uint32Array(256);
+  for(let i=0;i<n;i++){ const v=(d[i*4]*0.299+d[i*4+1]*0.587+d[i*4+2]*0.114)|0; g[i]=v; hist[v]++; }
+  let lo=0,hi=255,acc=0; const cut=n*0.02; for(lo=0;lo<255&&(acc+=hist[lo])<cut;lo++); acc=0; for(hi=255;hi>0&&(acc+=hist[hi])<cut;hi--);
+  const span=Math.max(1,hi-lo); for(let i=0;i<n;i++) g[i]=Math.max(0,Math.min(255,((g[i]-lo)*255/span)));
+  let out=g;
+  if(threshold){
+    const r=Math.max(8,Math.round(w/60)), ii=new Float64Array((w+1)*(h+1));
+    for(let y=0;y<h;y++){ let row=0; for(let x=0;x<w;x++){ row+=g[y*w+x]; ii[(y+1)*(w+1)+x+1]=ii[y*(w+1)+x+1]+row; } }
+    out=new Uint8ClampedArray(n);
+    for(let y=0;y<h;y++){ const y0=Math.max(0,y-r), y1=Math.min(h,y+r+1);
+      for(let x=0;x<w;x++){ const x0=Math.max(0,x-r), x1=Math.min(w,x+r+1);
+        const sum=ii[y1*(w+1)+x1]-ii[y0*(w+1)+x1]-ii[y1*(w+1)+x0]+ii[y0*(w+1)+x0], mean=sum/((x1-x0)*(y1-y0));
+        out[y*w+x]= g[y*w+x] > mean-offset ? 255 : 0; } }
+  }
+  for(let i=0;i<n;i++){ d[i*4]=d[i*4+1]=d[i*4+2]=out[i]; d[i*4+3]=255; }
+  ctx.putImageData(id,0,0); return c;
+}
+async function ocrLabel(img,rect,onProgress){
+  ocrLogger=onProgress;
+  try{
+    const w=await withTimeout(getOcrWorker(),180000);
+    try{ await w.setParameters({tessedit_pageseg_mode:"6"}); }catch(e){}
+    const texts=[];
+    for(const [target,off] of [[1400,18],[1800,18],[1800,12]]){
+      texts.push((await withTimeout(w.recognize(prepLabelCanvas(img,rect,true,target,off)),90000)).data.text||"");
+      const cur=combineParses(texts.map(x=>parseNutrition(x))); if(cur.found===4&&!cur.warn.length&&!cur.derivedKey) break;
+    }
+    return {text:texts.join("\n— — —\n"), r:combineParses(texts.map(x=>parseNutrition(x)))};
+  } finally { ocrLogger=null; }
+}
+
 function labelBtnHTML(id,text){
   const L=ocrLang();
   return `<div class="stack" style="gap:6px"><label class="labelbtn" for="${id}" data-warm="1">${text||"Заполнить с фото этикетки"}<input type="file" accept="image/*" capture="environment" id="${id}" hidden></label>
@@ -1008,27 +1171,44 @@ function bindLabelScan(inputId,fields,msgId){
   const langSel=$(inputId+"Lang"); if(langSel) langSel.onchange=()=>{ try{ localStorage.setItem("ocrLang",langSel.value); }catch(e){} };
   const lbl=inp.closest("label"); if(lbl) lbl.addEventListener("click",e=>{ if(IN_CLAUDE){ e.preventDefault(); msg(CLAUDE_ONLY_MSG,true); return; } warmOcr(); });
   const msg=(h,warn)=>{ const m=$(msgId); if(m){ m.innerHTML=h; m.style.color=warn?"var(--warn)":"var(--muted)"; } };
+  const apply=(text,r,manualBtn)=>{
+    const manual = manualBtn ? ` <button class="ghost" data-recrop="1" style="padding:0">Обвести вручную</button>` : "";
+    if(!r.found){ msg(`Не нашла на фото калории и БЖУ. Сфотографируй поближе таблицу «Пищевая ценность»${manualBtn?" или обведи её вручную:":"."}${manual}${text.trim()?` <details><summary>Что удалось прочитать</summary>${esc(text.slice(0,600))}</details>`:""}`,true); return; }
+    const set=(id,v)=>{ if(v!=null&&$(id)) $(id).value=r1(v); };
+    set(fields.k,r.kcal); set(fields.p,r.p); set(fields.f,r.f); set(fields.c,r.c);
+    const names={p:"белки",f:"жиры",c:"углеводы"};
+    const miss=[["калории",r.kcal],["белки",r.p],["жиры",r.f],["углеводы",r.c]].filter(x=>x[1]==null).map(x=>x[0]);
+    const notes=[];
+    if(r.kcalEstimated) notes.push("калорий на этикетке не нашла — посчитала по БЖУ");
+    if(r.derivedKey) notes.push(names[r.derivedKey]+" прочитались неразборчиво — досчитала по калориям");
+    if(miss.length) notes.push("не нашла: "+miss.join(", ")+" — впиши вручную");
+    r.warn.forEach(w=>notes.push(w));
+    msg(`Готово — сверь цифры с этикеткой (на 100 г).${notes.length?"<br>"+notes.map(esc).join("<br>"):""}${(miss.length||r.warn.length)&&manualBtn?"<br>Не то? "+manual:""} <details><summary>Распознанный текст</summary>${esc(text.slice(0,900))}</details>`, notes.length>0);
+  };
+  let lastImg=null;
+  const runManual=async()=>{
+    if(!lastImg) return;
+    const rect=await cropPicker(lastImg.img); if(!rect){ return; }
+    msg("Читаю выделенное…");
+    try{ const {text,r}=await ocrLabel(lastImg.img,rect,m=>{ if(m.status==="recognizing text") msg(`Читаю выделенное… ${Math.round((m.progress||0)*100)}%`); }); apply(text,r,true); }
+    catch(err){ msg("Не получилось распознать. Попробуй ещё раз.",true); }
+  };
+  const mEl=$(msgId); if(mEl) mEl.addEventListener("click",e=>{ if(e.target.closest("[data-recrop]")) runManual(); });
   inp.onchange=async e=>{
     const file=e.target.files&&e.target.files[0]; e.target.value=""; if(!file) return;
+    if(lastImg) URL.revokeObjectURL(lastImg.url);
+    try{ lastImg=await loadImageFile(file); }catch(err){ msg("Не получилось открыть фото.",true); return; }
     const t0=Date.now(); let phase="load";
-    const tickMsg=()=>{ if(phase==="load") msg(`Загружаю распознаватель… ${Math.round((Date.now()-t0)/1000)} с. В первый раз это до минуты, потом — мгновенно.`); };
+    const tickMsg=()=>{ if(phase==="load") msg(`Загружаю распознаватель… ${Math.round((Date.now()-t0)/1000)} с. В первый раз это до минуты, потом — быстро.`); };
     tickMsg(); const timer=setInterval(tickMsg,1000);
     try{
-      const text=await ocrImageFile(file,m=>{
-        if(m.status==="recognizing text"){ phase="read"; msg(`Читаю этикетку… ${Math.round((m.progress||0)*100)}%`); }
+      const {text,r}=await ocrAuto(lastImg.img,m=>{
+        if(m.status==="stage"){ phase=m.stage; msg(m.stage==="find"?"Ищу на фото блок «Пищевая ценность»…":"Нашла — читаю цифры…"); }
+        else if(m.status==="recognizing text" && phase!=="load") {}
       }).finally(()=>clearInterval(timer));
-      const r=parseNutrition(text);
-      if(!r.found){ msg(`Не нашла на фото калории и БЖУ. Сфотографируй поближе только таблицу «Пищевая ценность», ровно и без бликов.${text.trim()?` <details><summary>Что удалось прочитать</summary>${esc(text.slice(0,600))}</details>`:""}`,true); return; }
-      const set=(id,v)=>{ if(v!=null&&$(id)) $(id).value=r1(v); };
-      set(fields.k,r.kcal); set(fields.p,r.p); set(fields.f,r.f); set(fields.c,r.c);
-      const miss=[["калории",r.kcal],["белки",r.p],["жиры",r.f],["углеводы",r.c]].filter(x=>x[1]==null).map(x=>x[0]);
-      const notes=[];
-      if(r.kcalEstimated) notes.push("калорий на этикетке не нашла — посчитала по БЖУ");
-      if(miss.length) notes.push("не нашла: "+miss.join(", ")+" — впиши вручную");
-      r.warn.forEach(w=>notes.push(w));
-      msg(`Цифры подставлены — сверь их с этикеткой (нужны значения на 100 г).${notes.length?"<br>"+notes.map(esc).join("<br>"):""} <details><summary>Распознанный текст</summary>${esc(text.slice(0,800))}</details>`, notes.length>0);
+      apply(text,r,true);
     }catch(err){ msg(err&&err.message==="timeout" ? "Распознаватель слишком долго загружается. Попробуй через Wi-Fi или с выключенным VPN (ему VPN не нужен) — после первой загрузки он сохранится на телефоне." : "Не загрузился распознаватель текста. Проверь интернет и попробуй ещё раз.",true); }
-  };
+  };;
 }
 
 /* ---------- ОНЛАЙН: Open Food Facts и сканер штрихкодов ---------- */
@@ -1380,6 +1560,7 @@ function renderPlan(){
   html+=`<div class="card stack"><h2>Действия с днём</h2>
     <button class="primary" id="planToDiary" ${pendingN?"":"disabled"}>${!entries.length?"Отметить съеденным":pendingN?`Отметить всё съеденным (${pendingN})`:"Всё съедено ✓"}</button>
     <p class="note" style="margin:0">Можно отмечать и по одному — галочкой в дневнике.</p>
+    <div class="row"><button class="grow" id="planShareDay" ${entries.length?"":"disabled"}>Отправить день семье</button><button class="grow" id="planShareWeek">Отправить неделю</button></div>
     <button id="planCopy" ${entries.length?"":"disabled"}>${copyMode?"Отменить копирование":"Скопировать на другие дни"}</button>
     ${copyMode?`<div class="note">Нажми на день, куда скопировать это меню. То, что там было, заменится.</div><div class="chips">${[0,1,2,3,4,5,6].map(i=>addDays(menuWeek,i)).filter(d=>d!==menuDay).map(d=>`<button class="chip" data-copyto="${d}">${dowOf(d)} ${parseD(d).getDate()}</button>`).join("")}<button class="chip" data-copyto="next">${dowOf(menuDay)} след. недели</button></div>`:""}
     ${clearAsk?`<div class="row"><span class="small grow">Убрать всё меню этого дня?</span><button id="planClearNo">Нет</button><button class="primary" id="planClearYes" style="background:var(--warn)">Очистить</button></div>`:`<button id="planClear" ${entries.length?"":"disabled"}>Очистить день</button>`}
@@ -1393,7 +1574,7 @@ function renderDishes(){
       <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><h2 style="font-size:15px">${esc(d.name)}</h2><div class="small muted num">${P} ${P===1?"порция":P<5?"порции":"порций"} · ${fmt(f.portionG)} г порция</div></div><b class="num" style="white-space:nowrap">${fmt(f.tot.kcal/P)} ккал</b></div>
       <div class="small muted">${d.ing.map(i=>esc(i.name)+" "+fmt(i.g)+" г").join(" · ")}</div>
       <div class="small num">На порцию: Б ${fmt(f.tot.p/P)} · Ж ${fmt(f.tot.f/P)} · У ${fmt(f.tot.c/P)} г</div>
-      <div class="row"><button data-dedit="${d.id}">Изменить</button>${dishDelConfirm===d.id?`<span class="small grow">Удалить блюдо?</span><button data-ddelno="1">Нет</button><button class="primary" style="background:var(--warn)" data-ddelyes="${d.id}">Удалить</button>`:`<button class="icon" data-ddel="${d.id}">Удалить</button>`}</div>
+      <div class="row"><button data-dedit="${d.id}">Изменить</button><button data-dshare="${d.id}">Отправить семье</button>${dishDelConfirm===d.id?`<span class="small grow">Удалить блюдо?</span><button data-ddelno="1">Нет</button><button class="primary" style="background:var(--warn)" data-ddelyes="${d.id}">Удалить</button>`:`<button class="icon" data-ddel="${d.id}">Удалить</button>`}</div>
     </div>`; }).join("")
   : `<div class="empty">Блюд пока нет. Собери блюдо из продуктов, например «Овсянка с бананом» из хлопьев, молока и банана. Потом добавляй его в меню и дневник одной строкой — калории посчитаются по порции.</div>`);
 }
@@ -1588,6 +1769,154 @@ function openIdeaPlan(key){
   });
 }
 
+/* ---------- СЕМЬЯ: отправка блюд, приёмов пищи и меню через Telegram ---------- */
+const BOT_USERNAME="moy_dnevnik_food_bot";
+const b64url=bytes=>{ let s=""; for(let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]); return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); };
+const unb64url=s=>{ s=s.replace(/-/g,"+").replace(/_/g,"/"); while(s.length%4) s+="="; const b=atob(s), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; };
+async function packShare(obj){
+  let bytes=new TextEncoder().encode(JSON.stringify(obj)), pre="j";
+  if(window.CompressionStream){ try{ const z=new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer()); if(z.length<bytes.length){ bytes=z; pre="z"; } }catch(e){} }
+  return pre+b64url(bytes);
+}
+async function unpackShare(code){
+  let bytes=unb64url(code.slice(1));
+  if(code[0]==="z") bytes=new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+// продукт: из справочника — только название и вес, свой — со всеми цифрами
+function encItem(x){ const b=BASE_FOODS.find(f=>f.name===x.name); return (b&&r1(b.kcal)===r1(x.kcal)&&r1(b.p)===r1(x.p)&&r1(b.f)===r1(x.f)&&r1(b.c)===r1(x.c)) ? [x.name,r1(x.g)] : [x.name,r1(x.g),r1(x.kcal),r1(x.p),r1(x.f),r1(x.c)]; }
+function decItem(a){ if(!Array.isArray(a)) return null; if(a.length>=6) return {name:a[0],g:+a[1],kcal:+a[2],p:+a[3],f:+a[4],c:+a[5]}; const b=allFoods(false).find(f=>f.name===a[0]); return b?{name:b.name,g:+a[1],kcal:b.kcal,p:b.p,f:b.f,c:b.c}:null; }
+function encEntry(e){ return e.ing&&e.totalG ? ["d",e.meal,e.name,r1(e.g),r1(e.portionG||e.totalG),r1(e.totalG),e.ing.map(encItem)] : ["f",e.meal,...encItem(e)]; }
+function decEntry(a){
+  if(a[0]==="d"){ const ing=(a[6]||[]).map(decItem).filter(Boolean); const f=dishFood({name:a[2],portions:Math.max(1,Math.round(a[5]/a[4])),ing}); return {id:uidGen(),meal:a[1],name:a[2],g:+a[3],kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c),ing,totalG:r1(f.totalG),portionG:r1(f.portionG)}; }
+  const it=decItem(a.slice(2)); return it?{id:uidGen(),meal:a[1],...it}:null;
+}
+async function shareToFamily(obj,title){
+  let code; try{ code=await packShare(obj); }catch(e){ toast("Не получилось подготовить отправку"); return; }
+  const link=`https://t.me/${BOT_USERNAME}?startapp=${code}`;
+  let url,text;
+  if(code.length<=500){ url=link; text=`${title}. Нажми на ссылку — откроется дневник, и ты добавишь себе свою порцию.`; }
+  else { url=`https://t.me/${BOT_USERNAME}`; text=`${title}.\nЭто много данных для ссылки, поэтому так: скопируй это сообщение целиком, открой дневник и нажми «Вставить, что прислали».\nКОД:${code}`; }
+  if(TG&&TG.openTelegramLink){ try{ TG.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent(text)); return; }catch(e){} }
+  const all=text+"\n"+url;
+  try{ await navigator.clipboard.writeText(all); toast("Скопировано — отправь в семейный чат"); }
+  catch(e){ openSheet2(`<div class="row" style="justify-content:space-between"><h2>Отправить семье</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><p class="note" style="margin:0">Скопируй и отправь в семейный чат:</p><textarea rows="6" style="font:inherit;font-size:13px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(all)}</textarea>`); }
+}
+function shareDish(d){ shareToFamily({t:"d",n:d.name,p:d.portions||1,i:d.ing.map(encItem)}, `Блюдо «${d.name}» (${d.portions||1} порц.)`); }
+function shareMeal(date,meal){ const items=getDay(date).meals.filter(x=>x.meal===meal); if(!items.length) return; shareToFamily({t:"m",m:meal,i:items.map(encItem)}, `${meal}, ${human(date)}: ${items.map(x=>x.name).slice(0,3).join(", ")}${items.length>3?"…":""}`); }
+function shareDay(){ const e=getWeek(menuWeek).days[menuDay]||[]; if(!e.length) return; shareToFamily({t:"p",dt:menuDay,e:e.map(encEntry)}, `Меню на ${dowOf(menuDay).toLowerCase()}, ${human(menuDay)}`); }
+function shareWeek(){ const w=getWeek(menuWeek), d=[]; for(let i=0;i<7;i++) (w.days[addDays(menuWeek,i)]||[]).forEach(e=>d.push([i,...encEntry(e)])); if(!d.length){ toast("Меню на эту неделю пустое"); return; } shareToFamily({t:"w",wk:menuWeek,d}, `Меню на неделю ${shortD(menuWeek)} – ${shortD(addDays(menuWeek,6))}`); }
+
+/* приём: что прислали */
+function openReceive(obj){
+  const type=obj&&obj.t;
+  if(!["d","m","p","w"].includes(type)){ toast("Не получилось прочитать то, что прислали"); return; }
+  let mult=1, meal=obj.m||autoMeal(), day=(obj.dt&&obj.dt>=today())?obj.dt:today(), gIn=null, saveDish=true;
+  const thisWk=mondayOf(today()), nextWk=addDays(thisWk,7);
+  let wk=(obj.wk&&obj.wk>=thisWk)?obj.wk:(parseD(today()).getDay()===0?nextWk:thisWk);
+  let dish=null, items=[], entries=[], weekEntries=[];
+  if(type==="d"){ dish={id:uidGen(),name:obj.n,portions:Math.max(1,obj.p||1),ing:(obj.i||[]).map(decItem).filter(Boolean)}; }
+  if(type==="m"){ items=(obj.i||[]).map(decItem).filter(Boolean); }
+  if(type==="p"){ entries=(obj.e||[]).map(decEntry).filter(Boolean); }
+  if(type==="w"){ weekEntries=(obj.d||[]).map(a=>({i:a[0],e:decEntry(a.slice(1))})).filter(x=>x.e); }
+  const chipsMult=(vals,label)=>`<div class="row" style="gap:8px"><span class="grow small">${label}</span><div class="chips">${vals.map(n=>`<button class="chip" data-rmult="${n}" style="${n===mult?"background:var(--accent);color:var(--accent-ink)":""}">${String(n).replace(".",",")}</button>`).join("")}</div></div>`;
+  const mealSeg=()=>`<div class="seg">${MEALS.map(m=>`<button data-rmeal="${m}" aria-pressed="${m===meal}">${m}</button>`).join("")}</div>`;
+  const daySeg=()=>`<div class="seg">${[[addDays(today(),-1),"Вчера"],[today(),"Сегодня"],[addDays(today(),1),"Завтра"]].map(([d,l])=>`<button data-rday="${d}" aria-pressed="${d===day}">${l}</button>`).join("")}</div>`;
+  const draw=()=>{
+    let h="";
+    if(type==="d"){
+      const f=dishFood(dish), g = gIn!=null? gIn : Math.round(f.portionG*mult);
+      h=`<div class="banner"><b>${esc(dish.name)}</b><br><span class="small">${f.portions} порц. · ${fmt(f.tot.kcal/f.portions)} ккал на порцию (≈${fmt(f.portionG)} г)</span></div>
+        <div class="small muted">${dish.ing.map(i=>esc(i.name)+" "+fmt(i.g)+" г").join(" · ")}</div>
+        ${chipsMult([0.5,1,1.5,2],"Сколько порций ты съел(а)?")}
+        <div class="row"><span class="grow small">или в граммах</span><input id="rG" type="number" inputmode="decimal" value="${g}" style="max-width:110px"></div>
+        ${mealSeg()}${daySeg()}
+        <div class="small">В дневник: <b>${fmt(f.kcal*g/100)} ккал</b> · Б ${fmt(f.p*g/100,1)} · Ж ${fmt(f.f*g/100,1)} · У ${fmt(f.c*g/100,1)}</div>
+        <label class="row small" style="gap:8px"><input type="checkbox" id="rSave" ${saveDish?"checked":""} style="width:auto"> сохранить блюдо в «Мои блюда»</label>
+        <button class="primary" id="rAdd">Добавить в дневник</button><button id="rOnlySave">Только сохранить блюдо</button>`;
+    }
+    if(type==="m"){
+      const tot=items.reduce((s,x)=>s+x.kcal*x.g*mult/100,0);
+      h=`<div class="banner"><b>${esc(obj.m||"Приём пищи")}</b> · ${items.length} поз.</div>
+        <div class="stack" style="gap:0">${items.map(x=>`<div class="item" style="grid-template-columns:1fr auto"><div class="n">${esc(x.name)}<small class="num">${fmt(x.g*mult)} г</small></div><div class="k">${fmt(x.kcal*x.g*mult/100)}</div></div>`).join("")}</div>
+        ${chipsMult([0.5,0.75,1,1.5],"Твоя порция относительно этой")}
+        ${mealSeg()}${daySeg()}
+        <div class="small">В дневник: <b>${fmt(tot)} ккал</b>. Граммы потом можно поправить в дневнике.</div>
+        <button class="primary" id="rAdd">Добавить в дневник</button>`;
+    }
+    if(type==="p"){
+      const tot=planTotals(entries.map(e=>({...e,g:e.g*mult}))).kcal;
+      h=`<div class="banner"><b>Меню на день</b> · ${entries.length} поз. · ${fmt(tot)} ккал</div>
+        <div class="small muted">${entries.map(e=>esc(e.name)).join(" · ")}</div>
+        ${chipsMult([0.5,0.75,1,1.5],"Твои порции относительно этих")}
+        <div class="note" style="margin:0">В какой день добавить в твоё меню:</div>
+        <div class="daychips">${[0,1,2,3,4,5,6].map(i=>{ const dd=addDays(mondayOf(day),i); return `<button class="daychip" data-rday="${dd}" aria-pressed="${dd===day}"><span>${DOW[i]}</span><b>${parseD(dd).getDate()}</b></button>`; }).join("")}</div>
+        <div class="row"><button class="grow" data-rweekshift="-7">‹ пред. неделя</button><button class="grow" data-rweekshift="7">след. неделя ›</button></div>
+        <button class="primary" id="rAdd">Добавить в моё меню</button>`;
+    }
+    if(type==="w"){
+      h=`<div class="banner"><b>Меню на неделю</b> · ${weekEntries.length} поз.</div>
+        ${chipsMult([0.5,0.75,1,1.5],"Твои порции относительно этих")}
+        <div class="note" style="margin:0">На какую неделю поставить:</div>
+        <div class="seg">${[[thisWk,"Эта неделя"],[nextWk,"Следующая"]].concat(obj.wk&&obj.wk>nextWk?[[obj.wk,"Как у отправителя"]]:[]).map(([m,l])=>`<button data-rwk="${m}" aria-pressed="${m===wk}">${l} · ${shortD(m)}</button>`).join("")}</div>
+        <p class="note" style="margin:0">Блюда добавятся к тому, что уже есть в твоём меню.</p>
+        <button class="primary" id="rAdd">Добавить в моё меню</button>`;
+    }
+    $("rcvBody").innerHTML=h;
+    const gi=$("rG"); if(gi) gi.oninput=()=>{ gIn=num(gi.value); const f=dishFood(dish); const g=gIn||0; const s=$("rcvBody").querySelector(".small b"); };
+  };
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Тебе прислали</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><div id="rcvBody" class="stack"></div>`);
+  draw();
+  $("rcvBody").addEventListener("change",e=>{ if(e.target.id==="rG"){ gIn=num(e.target.value); draw(); } if(e.target.id==="rSave") saveDish=e.target.checked; });
+  $("rcvBody").addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return; const d=b.dataset;
+    if(d.rmult){ mult=+d.rmult; gIn=null; draw(); return; }
+    if(d.rmeal){ meal=d.rmeal; draw(); return; }
+    if(d.rday){ day=d.rday; draw(); return; }
+    if(d.rweekshift){ day=addDays(day,+d.rweekshift); draw(); return; }
+    if(d.rwk){ wk=d.rwk; draw(); return; }
+    const saveIt=()=>{ const ex=dishes().find(x=>norm(x.name)===norm(dish.name)); const keep=ex?{...dish,id:ex.id}:dish; Store.set("dishes",{items:dishes().filter(x=>x.id!==keep.id).concat([keep])},true); return keep; };
+    if(b.id==="rOnlySave"){ saveIt(); closeSheet2(); renderAll(); toast("Блюдо сохранено в «Мои блюда»"); return; }
+    if(b.id!=="rAdd") return;
+    if(type==="d"){
+      const g=gIn!=null?gIn:Math.round(dishFood(dish).portionG*mult); if(!(g>0)){ toast("Укажи, сколько съел(а)"); return; }
+      const dd=saveDish?saveIt():dish, f=dishFood(dd), dayDoc=clone(getDay(day));
+      dayDoc.meals.push({id:uidGen(),meal,name:dd.name,g:r1(g),kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c)}); putDay(day,dayDoc);
+      closeSheet2(); toast(`${dd.name}: +${fmt(f.kcal*g/100)} ккал`); curDate=day; go("diary");
+    }
+    if(type==="m"){
+      const dayDoc=clone(getDay(day)); items.forEach(x=>dayDoc.meals.push({id:uidGen(),meal,name:x.name,g:r1(x.g*mult),kcal:x.kcal,p:x.p,f:x.f,c:x.c})); putDay(day,dayDoc);
+      closeSheet2(); toast(`Добавлено в дневник: ${items.length} поз.`); curDate=day; go("diary");
+    }
+    if(type==="p"){
+      const mk=mondayOf(day), w=getWeek(mk); (w.days[day]=w.days[day]||[]).push(...entries.map(e=>({...e,id:uidGen(),g:r1(e.g*mult)}))); putWeek(mk,w);
+      closeSheet2(); toast(`Меню добавлено на ${dowOf(day).toLowerCase()}, ${human(day)}`); menuWeek=mk; menuDay=day; menuSub="plan"; go("menu");
+    }
+    if(type==="w"){
+      const w=getWeek(wk); weekEntries.forEach(({i,e})=>{ const dd=addDays(wk,i); (w.days[dd]=w.days[dd]||[]).push({...e,id:uidGen(),g:r1(e.g*mult)}); }); putWeek(wk,w);
+      closeSheet2(); toast("Меню на неделю добавлено"); menuWeek=wk; menuDay=wk; menuSub="plan"; go("menu");
+    }
+  });
+}
+async function handleIncoming(code){ try{ openReceive(await unpackShare(code)); }catch(e){ toast("Не получилось прочитать то, что прислали"); } }
+function openPasteShare(){
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Вставить, что прислали</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <p class="note" style="margin:0">Скопируй сообщение из семейного чата целиком (там есть «КОД:…») и вставь сюда.</p>
+    <textarea id="pasteTa" rows="5" style="font:inherit;font-size:14px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px" placeholder="Вставь сообщение"></textarea>
+    <div class="note" id="pasteMsg" style="color:var(--warn)"></div>
+    <button class="primary" id="pasteGo">Открыть</button>`);
+  setTimeout(()=>$("pasteTa").focus(),60);
+  $("pasteGo").onclick=()=>{ const t=$("pasteTa").value; const m=t.match(/(?:КОД:|startapp=)\s*([zj][A-Za-z0-9_-]{10,})/)||t.trim().match(/^([zj][A-Za-z0-9_-]{10,})$/);
+    if(!m){ $("pasteMsg").textContent="Не нашла код в тексте. Скопируй сообщение целиком."; return; } handleIncoming(m[1]); };
+}
+function checkStartParam(){
+  const sp=TG&&TG.initDataUnsafe&&TG.initDataUnsafe.start_param;
+  if(!(sp && /^[zj][A-Za-z0-9_-]{10,}$/.test(sp))) return;
+  const t0=Date.now();
+  const wait=()=>{ if(Store.synced || Store.mode!=="tg" || Date.now()-t0>6000) handleIncoming(sp); else setTimeout(wait,200); };
+  setTimeout(wait,300);
+}
+
 function bindMenu(){
   $("wPrev").onclick=()=>{ menuWeek=addDays(menuWeek,-7); menuDay=addDays(menuDay,-7); copyMode=false; clearAsk=false; renderMenu(); };
   $("wNext").onclick=()=>{ menuWeek=addDays(menuWeek,7); menuDay=addDays(menuDay,7); copyMode=false; clearAsk=false; renderMenu(); };
@@ -1604,6 +1933,8 @@ function bindMenu(){
       const w=getWeek(wk); w.days[target]=src; putWeek(wk,w); toast(`Скопировано на ${dowOf(target).toLowerCase()}, ${human(target)}`);
     }
     else if(d.dedit) openDishEditor(d.dedit);
+    else if(d.dshare){ const dd=dishes().find(x=>x.id===d.dshare); if(dd) shareDish(dd); }
+    else if(d.mshare) shareMeal(curDate,d.mshare);
     else if(d.ddel){ dishDelConfirm=d.ddel; renderDishes(); }
     else if(d.ddelno){ dishDelConfirm=null; renderDishes(); }
     else if(d.ddelyes){ dishDelConfirm=null; Store.set("dishes",{items:dishes().filter(x=>x.id!==d.ddelyes)}); toast("Блюдо удалено"); }
@@ -1617,6 +1948,9 @@ function bindMenu(){
     else if(d.pantdel){ const items=pantry(); items.splice(+d.pantdel,1); Store.set("pantry",{items}); }
     switch(t.id){
       case "dishNew": openDishEditor(null); break;
+      case "planShareDay": shareDay(); break;
+      case "planShareWeek": shareWeek(); break;
+      case "pasteShare": openPasteShare(); break;
       case "planCopy": copyMode=!copyMode; renderPlan(); break;
       case "planClear": clearAsk=true; renderPlan(); break;
       case "planClearNo": clearAsk=false; renderPlan(); break;
@@ -1733,6 +2067,7 @@ function onReady(){
   setSyncMode();
   fillProfileForm();
   go(profile()?"diary":"profile");
+  checkStartParam();
 }
 
 bind(); bindMenu(); updateMealSeg(); go("diary");
