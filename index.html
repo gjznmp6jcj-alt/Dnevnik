@@ -208,6 +208,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
         <button id="fScan" aria-label="Сканировать штрихкод">Штрихкод</button>
         <button id="fLabel" aria-label="Сфотографировать этикетку">Этикетка</button>
       </div>
+      <label class="labelbtn" id="aiWrap" hidden style="background:var(--accent-soft);color:var(--accent)">Фото еды — ИИ посчитает сам<input type="file" accept="image/*" capture="environment" id="aiFile" hidden></label>
       <button class="ghost" id="pasteShare" style="align-self:flex-start;padding-left:0">Вставить, что прислали</button>
       <div id="dishWrap" hidden><div class="note" style="margin-bottom:6px">Мои блюда</div><div class="chips" id="dishChips"></div></div>
       <div id="recentWrap" hidden><div class="note" style="margin-bottom:6px">Недавние</div><div class="chips" id="recent"></div></div>
@@ -228,12 +229,13 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
 
   <!-- МЕНЮ -->
   <section id="tab-menu" class="stack" hidden>
-    <div class="seg" id="menuSeg" role="group" aria-label="Раздел меню"><button data-msub="plan">План</button><button data-msub="dishes">Блюда</button><button data-msub="ideas">Идеи</button><button data-msub="shop">Покупки</button></div>
+    <div class="seg" id="menuSeg" role="group" aria-label="Раздел меню"><button data-msub="plan">План</button><button data-msub="dishes">Блюда</button><button data-msub="ideas">Идеи</button><button data-msub="shop">Покупки</button><button data-msub="family">Семья</button></div>
     <div class="datebar" id="menuWeekBar"><button id="wPrev" aria-label="Предыдущая неделя">‹</button><div class="d" id="wLabel"></div><button id="wNext" aria-label="Следующая неделя">›</button></div>
     <div id="menuPlan" class="stack"></div>
     <div id="menuDishes" class="stack" hidden></div>
     <div id="menuIdeas" class="stack" hidden></div>
     <div id="menuShop" class="stack" hidden></div>
+    <div id="menuFamily" class="stack" hidden></div>
   </section>
 
   <!-- ПРОГРЕСС -->
@@ -309,13 +311,14 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="bkRestore">Восстановить из копии</button>
       <div class="row" id="bkConfirm" hidden><span class="small grow">Текущие записи на этом устройстве заменятся данными из копии.</span><button class="grow" id="bkNo">Отмена</button><button class="primary grow" id="bkYes">Заменить</button></div>
     </div>
+    <div id="integrCards" class="stack"></div>
     <div class="card stack">
       <h2>Проверка связи</h2>
       <p class="note" style="margin:0">Если не работает поиск в интернете или штрихкоды — нажми и пришли скриншот результата.</p>
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 16</p>
+    <p class="note">Версия приложения: 2026-10-25 · 17</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -573,8 +576,8 @@ const profile = () => Store.get("profile");
 const customFoods = () => (Store.get("foods")?.items)||[];
 const weights = () => ((Store.get("weights")?.entries)||[]).slice().sort((a,b)=>a.date<b.date?-1:1);
 const dayKey = d => "d-"+d;
-const getDay = d => { const x=Store.get(dayKey(d)); return { meals:(x?.meals)||[], workouts:(x?.workouts)||[] }; };
-const putDay = (d,day) => Store.set(dayKey(d), {date:d, meals:day.meals, workouts:day.workouts});
+const getDay = d => { const x=Store.get(dayKey(d)); return { meals:(x?.meals)||[], workouts:(x?.workouts)||[], health:x?.health||null }; };
+const putDay = (d,day) => Store.set(dayKey(d), day.health? {date:d, meals:day.meals, workouts:day.workouts, health:day.health} : {date:d, meals:day.meals, workouts:day.workouts});
 function allFoods(withDishes=true){
   const map=new Map(); BASE_FOODS.forEach(f=>map.set(norm(f.name),{...f,custom:false}));
   customFoods().forEach(f=>map.set(norm(f.name),{...f,custom:true}));
@@ -615,6 +618,8 @@ function dayTotals(d){
   const day=getDay(d); const t={kcal:0,p:0,f:0,c:0,burn:0,min:0};
   day.meals.forEach(m=>{ const k=m.g/100; t.kcal+=m.kcal*k; t.p+=m.p*k; t.f+=m.f*k; t.c+=m.c*k; });
   day.workouts.forEach(w=>{ t.burn+=w.kcal; t.min+=w.min; });
+  t.woBurn=t.burn;
+  if(day.health){ t.steps=day.health.steps||0; t.active=day.health.active||0; t.burn=Math.max(t.burn,t.active); } // активные калории из «Здоровья» уже включают тренировки
   return t;
 }
 function allDays(){ return Object.keys(Store.docs).filter(k=>k.startsWith("d-")).map(k=>k.slice(2)).sort(); }
@@ -665,7 +670,8 @@ function renderDiary(){
         <span>Съедено</span><b>${fmt(t.kcal)} ккал</b>
         <span>Норма</span><b>${n?fmt(n)+" ккал":"–"}</b>
         ${planned.length?`<span>По плану</span><b>${fmt(planTotals(planned).kcal)} ккал</b>`:""}
-        <span>Сожжено на тренировках</span><b>${fmt(t.burn)} ккал</b>
+        <span>${t.active?"Сожжено (активность)":"Сожжено на тренировках"}</span><b>${fmt(t.burn)} ккал</b>
+        ${t.steps?`<span>Шаги</span><b>${fmt(t.steps)}</b>`:""}
         <span>Вода</span><b>${c?fmt(c.water,1)+" л":"–"}</b>
       </div>
     </div>
@@ -688,6 +694,7 @@ function renderDiary(){
   }).join("");
   $("meals").innerHTML = html || `<div class="empty">За этот день пока ничего не записано и не запланировано. Выбери приём пищи, введи продукт и вес — калории посчитаются сами.</div>`;
   // недавние
+  if($("aiWrap")) $("aiWrap").hidden=!(typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai);
   const myD=dishes().filter(d=>d.ing&&d.ing.length);
   $("dishWrap").hidden=!myD.length;
   $("dishChips").innerHTML=myD.map(d=>`<button class="chip" data-dishpick="${esc(d.name)}">${esc(d.name)}</button>`).join("");
@@ -836,7 +843,8 @@ function renderProgress(){
       <span>Минут тренировок всего</span><b>${fmt(woMin)}</b>
       <span>Сожжено на тренировках</span><b>${fmt(burn)} ккал</b>
       <span>Ожидаемое снижение</span><b>${fmt(c.weekly,2)} кг/нед</b>
-    </div></div>`;
+    </div></div>
+    <button class="primary" id="progCard">Карточка прогресса — поделиться</button>`;
 }
 function weightChart(w,p){
   // стартовая точка из профиля — только если она раньше первого взвешивания
@@ -1245,7 +1253,7 @@ async function offSearch(q){
   const ok=f=>f&&f.name&&f.kcal!=null;
   let err=null;
   // сначала продукты, которые продаются в России, потом все остальные
-  const sa=extra=>fetchJSON(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q+extra)}&page_size=40&langs=ru,en&fields=${OFF_FIELDS},countries_tags`);
+  const sa=extra=> (typeof serverReady==="function"&&serverReady()) ? offViaServer("search",q+extra) : fetchJSON(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q+extra)}&page_size=40&langs=ru,en&fields=${OFF_FIELDS},countries_tags`);
   const [ru,all]=await Promise.allSettled([sa(' countries_tags:"en:russia"'),sa("")]);
   const lists=[ru,all].filter(x=>x.status==="fulfilled"&&x.value&&Array.isArray(x.value.hits));
   if(lists.length){
@@ -1261,7 +1269,8 @@ async function offSearch(q){
   throw new Error(errText(err)||"поиск недоступен");
 }
 async function offByCode(code){
-  const j=await fetchJSON(`${OFF}/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`);
+  let j; try{ j = (typeof serverReady==="function"&&serverReady()) ? await offViaServer("product",code) : await fetchJSON(`${OFF}/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`); }
+  catch(e){ if(typeof serverReady==="function"&&serverReady()) j=await fetchJSON(`${OFF}/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`); else throw e; }
   if(!j||j.status!==1||!j.product) return null;
   return offToFood({...j.product,code});
 }
@@ -1533,8 +1542,8 @@ function renderMenu(){
   document.querySelectorAll("#menuSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.msub===menuSub)));
   $("menuWeekBar").hidden = menuSub==="dishes"||menuSub==="ideas";
   $("wLabel").textContent = shortD(menuWeek)+" – "+shortD(addDays(menuWeek,6))+(menuWeek===mondayOf(today())?" · эта неделя":"");
-  $("menuPlan").hidden=menuSub!=="plan"; $("menuDishes").hidden=menuSub!=="dishes"; $("menuShop").hidden=menuSub!=="shop"; $("menuIdeas").hidden=menuSub!=="ideas";
-  if(menuSub==="plan") renderPlan(); if(menuSub==="dishes") renderDishes(); if(menuSub==="shop") renderShop(); if(menuSub==="ideas") renderIdeas();
+  $("menuPlan").hidden=menuSub!=="plan"; $("menuDishes").hidden=menuSub!=="dishes"; $("menuShop").hidden=menuSub!=="shop"; $("menuIdeas").hidden=menuSub!=="ideas"; $("menuFamily").hidden=menuSub!=="family";
+  if(menuSub==="plan") renderPlan(); if(menuSub==="dishes") renderDishes(); if(menuSub==="shop") renderShop(); if(menuSub==="ideas") renderIdeas(); if(menuSub==="family") renderFamily();
 }
 function renderPlan(){
   const c=calc(), n=c?c.kcal:0, w=getWeek(menuWeek);
@@ -1564,6 +1573,7 @@ function renderPlan(){
     <button class="primary" id="planToDiary" ${pendingN?"":"disabled"}>${!entries.length?"Отметить съеденным":pendingN?`Отметить всё съеденным (${pendingN})`:"Всё съедено ✓"}</button>
     <p class="note" style="margin:0">Можно отмечать и по одному — галочкой в дневнике.</p>
     <div class="row"><button class="grow" id="planShareDay" ${entries.length?"":"disabled"}>Отправить день семье</button><button class="grow" id="planShareWeek">Отправить неделю</button></div>
+    <button id="planCal">Меню недели в календарь</button>
     <button id="planCopy" ${entries.length?"":"disabled"}>${copyMode?"Отменить копирование":"Скопировать на другие дни"}</button>
     ${copyMode?`<div class="note">Нажми на день, куда скопировать это меню. То, что там было, заменится.</div><div class="chips">${[0,1,2,3,4,5,6].map(i=>addDays(menuWeek,i)).filter(d=>d!==menuDay).map(d=>`<button class="chip" data-copyto="${d}">${dowOf(d)} ${parseD(d).getDate()}</button>`).join("")}<button class="chip" data-copyto="next">${dowOf(menuDay)} след. недели</button></div>`:""}
     ${clearAsk?`<div class="row"><span class="small grow">Убрать всё меню этого дня?</span><button id="planClearNo">Нет</button><button class="primary" id="planClearYes" style="background:var(--warn)">Очистить</button></div>`:`<button id="planClear" ${entries.length?"":"disabled"}>Очистить день</button>`}
@@ -1914,10 +1924,356 @@ function openPasteShare(){
 }
 function checkStartParam(){
   const sp=TG&&TG.initDataUnsafe&&TG.initDataUnsafe.start_param;
-  if(!(sp && /^[zj][A-Za-z0-9_-]{10,}$/.test(sp))) return;
+  if(!sp) return;
+  const whenReady=fn=>{ const t0=Date.now(); const w=()=>{ if(Store.synced||Store.mode!=="tg"||Date.now()-t0>6000) fn(); else setTimeout(w,200); }; setTimeout(w,300); };
+  if(/^h_/.test(sp)){ whenReady(()=>applyHealth(sp)); return; }
+  if(/^f_[A-Za-z0-9]{4,10}$/.test(sp)){ whenReady(()=>{ const go2=()=>serverInfo?famJoinPrompt(sp.slice(2)):setTimeout(go2,300); go2(); }); return; }
+  if(!/^[zj][A-Za-z0-9_-]{10,}$/.test(sp)) return;
   const t0=Date.now();
   const wait=()=>{ if(Store.synced || Store.mode!=="tg" || Date.now()-t0>6000) handleIncoming(sp); else setTimeout(wait,200); };
   setTimeout(wait,300);
+}
+
+/* ================= ИНТЕГРАЦИИ И СЕРВЕР ================= */
+let SERVER="", serverInfo=null, famState=null, famPoll=null;
+async function loadConfig(){
+  try{ const r=await fetch("config.json",{cache:"no-store"}); if(r.ok){ const j=await r.json(); SERVER=String(j.server||"").trim().replace(/\/+$/,""); } }catch(e){}
+  try{ const o=localStorage.getItem("serverOverride"); if(o) SERVER=o.trim().replace(/\/+$/,""); }catch(e){}
+}
+const serverReady=()=>!!(SERVER && TG && TG.initData);
+async function sapi(path,body,method){
+  const r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:{"content-type":"application/json","x-tg-init":TG.initData},body:body?JSON.stringify(body):undefined,cache:"no-store"});
+  let j=null; try{ j=await r.json(); }catch(e){}
+  if(!r.ok) throw new Error((j&&j.error)||("сервер ответил "+r.status));
+  return j;
+}
+async function initServer(){
+  await loadConfig();
+  if(!serverReady()){ renderServerCards(); return; }
+  try{ serverInfo=await sapi("hello",{tz:-new Date().getTimezoneOffset()}); }catch(e){ serverInfo={error:errText(e)}; }
+  renderServerCards(); if(tab==="diary") renderDiary();
+  syncDay(today()); syncDay(addDays(today(),-1));
+}
+
+/* --- сводки дня для бота (с задержкой, чтобы не дёргать сервер на каждую цифру) --- */
+const syncTimers={};
+function syncDay(date){
+  if(!serverReady()||!serverInfo||serverInfo.error) return;
+  clearTimeout(syncTimers[date]);
+  syncTimers[date]=setTimeout(async()=>{
+    const t=dayTotals(date), c=calc(), day=getDay(date), w=weights().find(x=>x.date===date);
+    try{ await sapi("day",{date,kcal:Math.round(t.kcal),norm:c?c.kcal:0,p:Math.round(t.p),f:Math.round(t.f),c:Math.round(t.c),burn:Math.round(t.burn),n:day.meals.length,steps:(day.health&&day.health.steps)||0,w:w?w.w:null}); }catch(e){}
+  },12000);
+}
+(function hookStore(){
+  const _set=Store.set.bind(Store);
+  Store.set=function(k,v,q){ _set(k,v,q); try{ if(k.startsWith("d-")) syncDay(k.slice(2)); else if(k==="weights"||k==="profile") syncDay(today()); }catch(e){} };
+})();
+
+/* --- прокси базы продуктов через сервер (работает без VPN) --- */
+async function offViaServer(kind,arg){
+  const path= kind==="search" ? "off/search?q="+encodeURIComponent(arg) : "off/product/"+encodeURIComponent(arg);
+  return await sapi(path);
+}
+
+/* ================= «ЗДОРОВЬЕ» НА iPHONE (через «Команды») ================= */
+function applyHealth(sp){
+  // h_<шаги>_<активные ккал>_<вес×10>[_<гггг-мм-дд>]
+  const a=sp.split("_"); const steps=+a[1]||0, active=+a[2]||0, w10=+a[3]||0, date=/^\d{4}-\d{2}-\d{2}$/.test(a[4]||"")?a[4]:today();
+  const day=clone(getDay(date)); day.health={steps,active,at:Date.now()}; putDay(date,day);
+  const parts=[]; if(steps) parts.push(`${fmt(steps)} шагов`); if(active) parts.push(`${fmt(active)} ккал активности`);
+  if(w10>200 && w10<4000){ const kg=w10/10; const entries=weights().filter(x=>x.date!==date); const old=weights().find(x=>x.date===date); entries.push({date,w:kg,...(old&&old.waist?{waist:old.waist}:{})}); Store.set("weights",{entries}); parts.push(`вес ${fmt(kg,1)} кг`); }
+  curDate=date; go("diary");
+  toast(parts.length?"Из «Здоровья»: "+parts.join(", "):"Из «Здоровья» пришли пустые данные");
+}
+const HEALTH_GUIDE=`<details><summary><b>Как настроить (5 минут)</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
+<li>Открой приложение <b>«Команды»</b> → «+» → назови команду «Дневник».</li>
+<li>Добавь действие <b>«Найти образцы здоровья»</b>: Тип — <b>Шаги</b>, Дата начала — <b>Сегодня</b>. Затем действие <b>«Вычислить статистику»</b> → <b>Сумма</b>.</li>
+<li>Ещё раз <b>«Найти образцы здоровья»</b>: Тип — <b>Активная энергия</b>, Дата начала — <b>Сегодня</b> → <b>«Вычислить статистику»</b> → <b>Сумма</b>.</li>
+<li>Для веса: <b>«Найти образцы здоровья»</b>: Тип — <b>Вес</b>, сортировка — <b>Дата начала, сначала новые</b>, ограничение — <b>1</b>. Затем <b>«Вычислить»</b>: результат × 10 и <b>«Округлить число»</b>.</li>
+<li>Добавь действие <b>«Текст»</b> и собери в нём: <code>https://t.me/${BOT_USERNAME}?startapp=h_</code>[шаги]<code>_</code>[энергия]<code>_</code>[вес×10] — вставляй результаты нажатием на «Переменная». Если вес не нужен — поставь в конце <code>_0</code>.</li>
+<li>Последнее действие — <b>«Открыть URL»</b>.</li>
+<li>Чтобы данные приходили сами: «Команды» → <b>«Автоматизация»</b> → «+» → <b>«Время суток»</b>, например 21:00, ежедневно → «Запускать сразу» → выбери команду «Дневник».</li>
+</ol><p class="note" style="margin:0">Шаги и активность покажутся в дневнике за день, а вес попадёт во вкладку «Вес». Часы, браслеты и умные весы попадают сюда, если они синхронизируются со «Здоровьем».</p></details>`;
+
+/* ================= КАЛЕНДАРЬ ================= */
+const icsEsc=s=>String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\n/g,"\\n");
+const icsDT=(date,hm)=>date.replace(/-/g,"")+"T"+hm.replace(":","")+"00";
+function buildICS(times,remind){
+  const w=getWeek(menuWeek), L=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Dnevnik//RU","CALSCALE:GREGORIAN","X-WR-CALNAME:Меню на неделю"];
+  const stamp=new Date().toISOString().replace(/[-:]/g,"").slice(0,15)+"Z"; let n=0;
+  for(let i=0;i<7;i++){ const d=addDays(menuWeek,i), entries=w.days[d]||[];
+    MEALS.forEach(m=>{ const items=entries.filter(e=>e.meal===m); if(!items.length) return; n++;
+      const kc=planTotals(items).kcal, start=times[m]||"12:00", [h,mi]=start.split(":").map(Number), endM=h*60+mi+30, end=String(Math.floor(endM/60)%24).padStart(2,"0")+":"+String(endM%60).padStart(2,"0");
+      L.push("BEGIN:VEVENT",`UID:dn-${d}-${m}-${Math.random().toString(36).slice(2,8)}@dnevnik`,`DTSTAMP:${stamp}`,`DTSTART:${icsDT(d,start)}`,`DTEND:${icsDT(d,end)}`,
+        `SUMMARY:${icsEsc(`${m} · ${fmt(kc)} ккал`)}`,`DESCRIPTION:${icsEsc(items.map(e=>`${e.name} — ${fmt(e.g)} г, ${fmt(e.kcal*e.g/100)} ккал`).join("\n"))}`);
+      if(remind>0) L.push("BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${icsEsc(m)}`,`TRIGGER:-PT${remind}M`,"END:VALARM");
+      L.push("END:VEVENT"); }); }
+  L.push("END:VCALENDAR");
+  return {text:L.join("\r\n"),count:n};
+}
+function openCalendarExport(){
+  const saved=(()=>{ try{ return JSON.parse(localStorage.getItem("calTimes")||"null"); }catch(e){ return null; } })()||{"Завтрак":"08:30","Обед":"13:00","Перекус":"16:30","Ужин":"19:00",remind:10};
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Меню в календарь</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <p class="note" style="margin:0">Неделя ${shortD(menuWeek)} – ${shortD(addDays(menuWeek,6))}. Каждый приём пищи станет событием с составом и калориями.</p>
+    <div class="row">${MEALS.map(m=>`<label class="f">${m}<input type="time" id="cal_${m}" value="${saved[m]}"></label>`).join("")}</div>
+    <label class="f">Напомнить<select id="calRem"><option value="0">не напоминать</option><option value="10">за 10 минут</option><option value="30">за 30 минут</option><option value="60">за час</option></select></label>
+    <div class="note" id="calMsg"></div>
+    <button class="primary" id="calGo">Добавить в календарь</button>`);
+  $("calRem").value=String(saved.remind);
+  $("calGo").onclick=async()=>{
+    const times={}; MEALS.forEach(m=>times[m]=$("cal_"+m).value||saved[m]); const remind=+$("calRem").value;
+    try{ localStorage.setItem("calTimes",JSON.stringify({...times,remind})); }catch(e){}
+    const {text,count}=buildICS(times,remind);
+    if(!count){ $("calMsg").textContent="На эту неделю в меню пока пусто."; return; }
+    await deliverFile(`Меню ${shortD(menuWeek)}.ics`,"text/calendar;charset=utf-8",text,{inline:true,msgEl:"calMsg",hint:"Откроется Safari — нажми «Добавить все» в календарь."});
+  };
+}
+
+/* ================= ФАЙЛЫ: Excel, картинки ================= */
+const toB64=str=>{ const bytes=new TextEncoder().encode(str); let s=""; for(let i=0;i<bytes.length;i+=0x8000) s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000)); return btoa(s); };
+async function deliverFile(name,mime,content,opts={}){
+  const msg=t=>{ const m=opts.msgEl&&$(opts.msgEl); if(m) m.innerHTML=t; };
+  const b64 = opts.b64 ? content : toB64(content);
+  if(serverReady()){
+    msg("Готовлю файл…");
+    try{
+      const {url}=await sapi("file",{name,mime,b64,inline:!!opts.inline});
+      if(opts.inline || !(TG.isVersionAtLeast&&TG.isVersionAtLeast("8.0")&&TG.downloadFile)) TG.openLink(url);
+      else TG.downloadFile({url,file_name:name});
+      msg(opts.hint||"Готово."); return url;
+    }catch(e){ msg("Не получилось: "+esc(errText(e))); return null; }
+  }
+  if(TG){ msg("Чтобы сохранять файлы из Telegram, нужен сервер приложения (см. «Профиль» → «Сервер»)."); return null; }
+  try{ const a=document.createElement("a"); a.href=URL.createObjectURL(opts.b64?new Blob([Uint8Array.from(atob(b64),c=>c.charCodeAt(0))],{type:mime}):new Blob([content],{type:mime})); a.download=name; document.body.appendChild(a); a.click(); a.remove(); msg("Файл сохранён."); }catch(e){ msg("Браузер не дал сохранить файл."); }
+  return null;
+}
+function buildCSV(){
+  const q=v=>{ v=v==null?"":String(v); return /[;"\n]/.test(v)?`"${v.replace(/"/g,'""')}"`:v; }, n=v=>v==null?"":String(r1(v)).replace(".",",");
+  const L=[]; const row=a=>L.push(a.map(q).join(";"));
+  row(["Дневник питания"]); row(["Дата","Приём пищи","Продукт","Вес, г","Ккал","Белки, г","Жиры, г","Углеводы, г"]);
+  allDays().forEach(d=>getDay(d).meals.forEach(m=>row([d,m.meal,m.name,n(m.g),n(m.kcal*m.g/100),n(m.p*m.g/100),n(m.f*m.g/100),n(m.c*m.g/100)])));
+  L.push(""); row(["Итоги по дням"]); row(["Дата","Съедено, ккал","Норма, ккал","Белки","Жиры","Углеводы","Сожжено","Шаги"]);
+  const c=calc(); allDays().forEach(d=>{ const t=dayTotals(d), h=getDay(d).health; row([d,n(t.kcal),c?c.kcal:"",n(t.p),n(t.f),n(t.c),n(t.burn),h?h.steps:""]); });
+  L.push(""); row(["Вес"]); row(["Дата","Вес, кг","Талия, см"]); weights().forEach(w=>row([w.date,n(w.w),w.waist?n(w.waist):""]));
+  L.push(""); row(["Тренировки"]); row(["Дата","Вид","Минуты","Сожжено, ккал"]); allDays().forEach(d=>getDay(d).workouts.forEach(w=>row([d,w.type,w.min,w.kcal])));
+  return "\uFEFF"+L.join("\r\n");
+}
+
+/* ================= КАРТОЧКА ПРОГРЕССА ================= */
+function drawProgressCard(){
+  const p=profile(), c=calc(); if(!p||!c) return null;
+  const W=1080,H=1350, cv=document.createElement("canvas"); cv.width=W; cv.height=H; const x=cv.getContext("2d");
+  const g=x.createLinearGradient(0,0,0,H); g.addColorStop(0,"#1F3A2B"); g.addColorStop(1,"#111813"); x.fillStyle=g; x.fillRect(0,0,W,H);
+  const lost=p.w0-c.w, path=Math.max(0,Math.min(1,lost/((p.w0-p.goal)||1)));
+  const days=allDays().filter(d=>dayTotals(d).kcal>0), avg=days.length?days.reduce((s,d)=>s+dayTotals(d).kcal,0)/days.length:0;
+  const wo=allDays().reduce((s,d)=>s+getDay(d).workouts.length,0);
+  const F='"Manrope",system-ui,sans-serif', D='"Unbounded","Manrope",system-ui,sans-serif';
+  x.fillStyle="#9AA99E"; x.font=`600 40px ${F}`; x.fillText("Мой прогресс",80,140);
+  x.fillStyle="#E6EEE7"; x.font=`700 150px ${D}`; x.fillText((lost>0?"−":"")+fmt(Math.abs(lost),1)+" кг",80,320);
+  x.fillStyle="#9AA99E"; x.font=`500 40px ${F}`; x.fillText(`${fmt(p.w0,1)} → ${fmt(c.w,1)} кг · цель ${fmt(p.goal,1)} кг`,80,390);
+  x.fillStyle="#2E3B32"; x.beginPath(); x.roundRect(80,440,W-160,36,18); x.fill();
+  x.fillStyle="#6FC195"; x.beginPath(); x.roundRect(80,440,Math.max(36,(W-160)*path),36,18); x.fill();
+  x.fillStyle="#E6EEE7"; x.font=`600 36px ${F}`; x.fillText(`${Math.round(path*100)}% пути`,80,530);
+  const tiles=[[fmt(days.length),"дней в дневнике"],[avg?fmt(avg):"–","ккал в среднем"],[fmt(wo),"тренировок"],[c.goalDate?shortD(c.goalDate):"–","цель примерно"]];
+  tiles.forEach(([v,l],i)=>{ const tx=80+(i%2)*470, ty=600+Math.floor(i/2)*250; x.fillStyle="rgba(255,255,255,.06)"; x.beginPath(); x.roundRect(tx,ty,450,210,28); x.fill();
+    x.fillStyle="#E6EEE7"; x.font=`700 72px ${D}`; x.fillText(v,tx+36,ty+110); x.fillStyle="#9AA99E"; x.font=`500 34px ${F}`; x.fillText(l,tx+36,ty+170); });
+  const ws=weights(); if(ws.length>=2){ const pts=ws.slice(-12), lo=Math.min(...pts.map(q=>q.w))-0.5, hi=Math.max(...pts.map(q=>q.w))+0.5, X0=80,X1=W-80,Y0=1130,Y1=1260;
+    x.strokeStyle="#6FC195"; x.lineWidth=8; x.lineJoin="round"; x.beginPath(); pts.forEach((q,i)=>{ const px=X0+(X1-X0)*i/(pts.length-1), py=Y1-(Y1-Y0)*(q.w-lo)/(hi-lo); i?x.lineTo(px,py):x.moveTo(px,py); }); x.stroke(); }
+  x.fillStyle="#5E6C62"; x.font=`500 30px ${F}`; x.fillText("Дневник похудения · Telegram",80,H-50);
+  return cv;
+}
+function openProgressCard(){
+  const cv=drawProgressCard(); if(!cv){ toast("Сначала заполни профиль"); return; }
+  const png=cv.toDataURL("image/png"), b64=png.split(",")[1];
+  const can=serverReady();
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Карточка прогресса</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <img src="${png}" alt="Карточка прогресса" style="width:100%;border-radius:14px">
+    ${can?`<button class="primary" id="pcSend">Прислать в чат с ботом</button>
+    ${TG.isVersionAtLeast&&TG.isVersionAtLeast("7.8")&&TG.shareToStory?`<button id="pcStory">Выложить в сторис</button>`:""}
+    <button id="pcSave">Сохранить картинку</button>`:`<p class="note" style="margin:0">${TG?"Чтобы отправить или сохранить карточку из Telegram, подключи сервер приложения (см. «Профиль» → «Сервер»). Пока можно сделать скриншот.":"Сохрани картинку долгим нажатием."}</p>`}
+    <div class="note" id="pcMsg"></div>`);
+  if(!can) return;
+  $("pcSend").onclick=async()=>{ $("pcMsg").textContent="Отправляю…"; try{ const r=await sapi("send-photo",{b64,caption:"Мой прогресс 💪"}); $("pcMsg").textContent=r.ok?"Готово! Карточка в чате с ботом — оттуда её можно переслать кому угодно.":("Не получилось: "+(r.error||"")+". Нажми в боте /start и попробуй снова."); }catch(e){ $("pcMsg").textContent="Не получилось: "+errText(e); } };
+  const st=$("pcStory"); if(st) st.onclick=async()=>{ $("pcMsg").textContent="Готовлю…"; try{ const {url}=await sapi("file",{name:"progress.png",mime:"image/png",b64,inline:true}); TG.shareToStory(url,{text:"Мой прогресс 💪"}); $("pcMsg").textContent=""; }catch(e){ $("pcMsg").textContent="Не получилось: "+errText(e); } };
+  $("pcSave").onclick=()=>deliverFile("Мой прогресс.png","image/png",b64,{b64:true,msgEl:"pcMsg"});
+}
+
+/* ================= ФОТО ЕДЫ С ИИ ================= */
+function resizeToJpeg(img,max=1024,q=0.82){
+  const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)), c=document.createElement("canvas");
+  c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc); c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",q);
+}
+function openAiPhoto(file){
+  let items=[], meal=autoMeal(), hint="", dataUrl=null;
+  const day=curDate;
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Еда по фото</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><div id="aiBody" class="stack"></div>`);
+  const body=t=>{ if($("aiBody")) $("aiBody").innerHTML=t; };
+  const drawResult=note=>{
+    const tot=items.filter(x=>x.on).reduce((s,x)=>s+x.kcal*x.grams/100,0);
+    body(`${dataUrl?`<img src="${dataUrl}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:12px">`:""}
+      ${note?`<div class="note" style="margin:0">${esc(note)}</div>`:""}
+      ${items.length?`<div class="stack" style="gap:0">${items.map((x,i)=>`<div class="item" style="grid-template-columns:24px 1fr 74px 54px">
+        <input type="checkbox" data-aion="${i}" ${x.on?"checked":""} style="width:20px;height:20px;accent-color:var(--accent)" aria-label="Добавить ${esc(x.name)}">
+        <div class="n"><input data-ainame="${i}" value="${esc(x.name)}" style="padding:4px 6px;font-size:14px;text-align:left" aria-label="Название"><small class="num">${fmt(x.kcal)} ккал/100 г · Б ${fmt(x.p,1)} Ж ${fmt(x.f,1)} У ${fmt(x.c,1)}</small></div>
+        <input type="number" inputmode="decimal" data-aig="${i}" value="${x.grams}" aria-label="Граммы"><div class="k">${fmt(x.kcal*x.grams/100)}</div></div>`).join("")}</div>
+      <div class="seg">${MEALS.map(m=>`<button data-aimeal="${m}" aria-pressed="${m===meal}">${m}</button>`).join("")}</div>
+      <div class="small">Итого: <b>${fmt(tot)} ккал</b>. Вес порций ИИ оценивает на глаз — поправь, если знаешь точно.</div>
+      <button class="primary" id="aiAdd">Добавить в дневник</button>`:`<div class="empty">Еду на фото не нашла. Попробуй снять сверху и поближе.</div>`}
+      <div class="row"><input id="aiHint" class="grow" style="flex:1 1 160px" placeholder="Подсказка: «плов, большая тарелка»" value="${esc(hint)}"><button id="aiRetry">Переспросить</button></div>`);
+  };
+  const ask=async()=>{
+    body(`${dataUrl?`<img src="${dataUrl}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:12px">`:""}<div class="note" style="margin:0">Смотрю, что на тарелке… обычно 5–10 секунд.</div>`);
+    try{
+      const r=await sapi("ai/photo",{image:dataUrl.split(",")[1],mime:"image/jpeg",hint});
+      items=(r.items||[]).map(x=>({...x,on:true})); drawResult(r.note||"");
+    }catch(e){ body(`<div class="empty">Не получилось распознать: ${esc(errText(e))}</div><button id="aiRetry">Попробовать ещё раз</button>`); }
+  };
+  $("aiBody").addEventListener("change",e=>{ const el=e.target, d=el.dataset;
+    if(d.aion!=null){ items[+d.aion].on=el.checked; drawResult(); }
+    if(d.aig!=null){ const v=num(el.value); if(v>0){ items[+d.aig].grams=r1(v); drawResult(); } }
+    if(d.ainame!=null){ items[+d.ainame].name=el.value.trim()||items[+d.ainame].name; }
+    if(el.id==="aiHint") hint=el.value.trim(); });
+  $("aiBody").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+    if(b.dataset.aimeal){ meal=b.dataset.aimeal; drawResult(); }
+    if(b.id==="aiRetry"){ hint=($("aiHint")&&$("aiHint").value.trim())||hint; ask(); }
+    if(b.id==="aiAdd"){ const sel=items.filter(x=>x.on); if(!sel.length){ toast("Отметь хотя бы одно блюдо"); return; }
+      const d=clone(getDay(day)); sel.forEach(x=>d.meals.push({id:uidGen(),meal,name:x.name,g:r1(x.grams),kcal:r1(x.kcal),p:r1(x.p),f:r1(x.f),c:r1(x.c)})); putDay(day,d);
+      closeSheet2(); toast(`${meal}: +${fmt(sel.reduce((s,x)=>s+x.kcal*x.grams/100,0))} ккал`); renderAll(); } });
+  loadImageFile(file).then(({img,url})=>{ dataUrl=resizeToJpeg(img); URL.revokeObjectURL(url); ask(); }).catch(()=>body(`<div class="empty">Не получилось открыть фото.</div>`));
+}
+
+/* ================= СЕМЬЯ (через сервер) ================= */
+async function famLoad(silent){
+  if(!serverReady()) return;
+  try{ const r=await sapi("family"); famState=r.family?r:null; }catch(e){ if(!silent) toast("Семья: "+errText(e)); }
+  if(tab==="menu"&&menuSub==="family") renderFamily();
+}
+function famStartPoll(){ clearInterval(famPoll); famPoll=setInterval(()=>{ if(tab==="menu"&&menuSub==="family"&&!document.hidden) famLoad(true); },20000); }
+function famShopItems(entries){
+  const map=new Map(), cooks=new Map();
+  const add=(name,g)=>{ const r=RAW_MAP[name]; if(r){ name=r[0]; g*=r[1]; } const k=norm(name), cur=map.get(k)||{name,g:0}; cur.g+=g; map.set(k,cur); };
+  entries.forEach(e=>{ if(e.ing&&e.totalG){ const pg=e.portionG||e.totalG, k=norm(e.name), cur=cooks.get(k)||{ing:e.ing,portions:Math.max(1,Math.round(e.totalG/pg)),P:0}; cur.P+=e.g/pg; cooks.set(k,cur); } else add(e.name,e.g); });
+  for(const c of cooks.values()){ const times=Math.max(1,Math.ceil(c.P/c.portions-0.05)); c.ing.forEach(x=>add(x.name,x.g*times)); }
+  return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,"ru"));
+}
+let famMenuCache={code:null,entries:[]};
+async function renderFamily(){
+  const el=$("menuFamily"); if(!el) return;
+  if(!serverReady()){ el.innerHTML=`<div class="empty">Семейная группа работает через сервер приложения. ${TG?"Подключи его по инструкции — «Профиль» → «Сервер».":"Открой приложение в Telegram."}<br><br>А отправлять блюда и меню родным можно уже сейчас — кнопками «Отправить семье».</div>`; return; }
+  if(!famState){
+    el.innerHTML=`<div class="card stack"><h2>Создать семью</h2><p class="note" style="margin:0">Один ведёт меню и делится блюдами — у остальных всё появляется в группе, а бот присылает уведомления.</p>
+      <input id="famTitle" placeholder="Название, например «Ивановы»" aria-label="Название семьи"><button class="primary" id="famCreate">Создать</button></div>
+      <div class="card stack"><h2>Присоединиться</h2><input id="famCode" placeholder="Код из приглашения, например K7QF2M" autocapitalize="characters" aria-label="Код семьи"><button id="famJoin">Войти в семью</button></div>`;
+    return;
+  }
+  const f=famState.family, me=famState.me;
+  if(f.menu&&f.menu.code!==famMenuCache.code){ try{ const o=await unpackShare(f.menu.code); famMenuCache={code:f.menu.code,entries:(o.d||[]).map(a=>decEntry(a.slice(1))).filter(Boolean)}; }catch(e){ famMenuCache={code:f.menu.code,entries:[]}; } }
+  const shop=f.menu?famShopItems(famMenuCache.entries):[], bought=f.shop||{};
+  const ago=t=>{ const m=Math.round((Date.now()-t)/60000); return m<1?"только что":m<60?m+" мин назад":m<1440?Math.round(m/60)+" ч назад":Math.round(m/1440)+" дн назад"; };
+  el.innerHTML=`<div class="card stack">
+      <div class="row" style="justify-content:space-between"><h2>${esc(f.title)}</h2><span class="tag">код ${esc(f.code)}</span></div>
+      <div class="chips">${f.members.map(m=>`<span class="chip">${esc(m.name)}${m.id===me?" (ты)":""}</span>`).join("")}</div>
+      <div class="row"><button class="grow primary" id="famInvite">Пригласить</button><button class="grow" id="famLeave">Выйти</button></div></div>
+    <div class="card stack"><h2>Меню семьи на неделю</h2>
+      ${f.menu?`<p class="small" style="margin:0">От ${esc(f.menu.name)} · неделя с ${shortD(f.menu.wk)} · ${famMenuCache.entries.length} поз.</p>
+        <div class="row"><button class="grow primary" id="famTakeMenu">Взять к себе в меню</button>${f.menu.by===me?`<button class="grow" id="famClearMenu">Убрать</button>`:""}</div>`
+      :`<p class="note" style="margin:0">Пока нет. Составь меню во вкладке «План» и поделись им здесь — у всех появится общий список покупок.</p>`}
+      <button id="famShareMenu">${f.menu?"Заменить моим меню":"Поделиться моим меню"} (${shortD(menuWeek)} – ${shortD(addDays(menuWeek,6))})</button></div>
+    ${shop.length?`<div class="card"><div class="row" style="justify-content:space-between;margin-bottom:4px"><h2>Общий список покупок</h2><span class="small muted">${shop.filter(i=>!bought[norm(i.name)]).length} из ${shop.length}</span></div>
+      ${shop.map(i=>{ const k=norm(i.name), b=bought[k]; return `<label class="shop${b?" done":""}"><input type="checkbox" data-fbuy="${esc(k)}" ${b?"checked":""}><span class="grow">${esc(i.name)}${b?` <span class="small muted">· купил(а) ${esc(b)}</span>`:""}</span><b class="num">${shopQty(i)}</b></label>`; }).join("")}</div>`:""}
+    <div class="card stack"><h2>Лента семьи</h2>
+      ${(f.feed||[]).length?(f.feed||[]).map(it=>`<div class="item" style="grid-template-columns:1fr auto"><div class="n">${esc(it.title)}<small>${esc(it.name)} · ${ago(it.at)}${it.kcal?` · ${fmt(it.kcal)} ккал`:""}</small></div>${it.from!==me?`<button data-famtake="${esc(it.id)}">Добавить себе</button>`:`<span class="small muted">ты</span>`}</div>`).join("")
+      :`<p class="note" style="margin:0">Здесь появится то, чем делятся члены семьи: блюда, приёмы пищи, меню. Делиться — кнопкой «Отправить семье» у блюда или приёма пищи.</p>`}</div>`;
+}
+async function famAction(path,body,okMsg){ try{ const r=await sapi(path,body); famState=r.family?r:null; if(okMsg) toast(okMsg); }catch(e){ toast(errText(e)); } renderFamily(); }
+function famShareMyMenu(){
+  const w=getWeek(menuWeek), d=[]; for(let i=0;i<7;i++) (w.days[addDays(menuWeek,i)]||[]).forEach(e=>d.push([i,...encEntry(e)]));
+  if(!d.length){ toast("Меню на эту неделю пустое — сначала заполни «План»"); return; }
+  packShare({t:"w",wk:menuWeek,d}).then(code=>famAction("family/menu",{wk:menuWeek,code},"Меню отправлено семье"));
+}
+function famInvite(){
+  const f=famState.family, link=`https://t.me/${BOT_USERNAME}?startapp=f_${f.code}`;
+  const txt=`Присоединяйся к нашей семье «${f.title}» в дневнике питания: нажми на ссылку. Код: ${f.code}`;
+  if(TG&&TG.openTelegramLink) TG.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt));
+}
+function famJoinPrompt(code){
+  if(!serverReady()){ toast("Для семьи нужен сервер приложения"); return; }
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Приглашение в семью</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <p style="margin:0">Тебя пригласили в семейную группу. Код: <b>${esc(code)}</b></p>
+    <p class="note" style="margin:0">Участники видят блюда и меню, которыми ты делишься, и общий список покупок. Твой дневник и вес остаются личными.</p>
+    <button class="primary" id="famJoinYes">Присоединиться</button>`);
+  $("famJoinYes").onclick=async()=>{ closeSheet2(); await famAction("family/join",{code},"Ты в семье!"); menuSub="family"; go("menu"); };
+}
+/* «Отправить семье»: если есть группа — предлагаем отправить туда */
+const _shareToFamilyChat=shareToFamily;
+shareToFamily=async function(obj,title){
+  if(!(serverReady()&&famState)) return _shareToFamilyChat(obj,title);
+  const kcal = obj.t==="d" ? null : null;
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Отправить семье</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <p class="small" style="margin:0">${esc(title)}</p>
+    <button class="primary" id="shFam">В группу «${esc(famState.family.title)}»</button>
+    <p class="note" style="margin:0">Появится в ленте семьи, и бот пришлёт всем уведомление с кнопкой «Добавить себе».</p>
+    <button id="shChat">Выбрать чат в Telegram</button>`);
+  $("shChat").onclick=()=>{ closeSheet2(); _shareToFamilyChat(obj,title); };
+  $("shFam").onclick=async()=>{ const code=await packShare(obj); closeSheet2(); await famAction("family/post",{kind:obj.t,title,code},"Отправлено семье"); };
+};
+
+/* ================= ПРОФИЛЬ: сервер, напоминания, иконка, выгрузка ================= */
+function renderServerCards(){
+  const el=$("integrCards"); if(!el) return;
+  const s=serverInfo&&serverInfo.settings;
+  const hs=TG&&TG.isVersionAtLeast&&TG.isVersionAtLeast("8.0")&&TG.addToHomeScreen;
+  el.innerHTML=`
+    ${hs?`<div class="card stack"><h2>Иконка на экране</h2><p class="note" style="margin:0">Дневник будет открываться с главного экрана телефона, как обычное приложение.</p><button id="homeBtn">Добавить иконку на экран</button></div>`:""}
+    <div class="card stack"><h2>«Здоровье» на iPhone</h2><p class="note" style="margin:0">Шаги, активные калории и вес — из «Здоровья», часов и умных весов, автоматически каждый вечер.</p>${HEALTH_GUIDE}</div>
+    <div class="card stack"><h2>Выгрузка</h2><p class="note" style="margin:0">Дневник, итоги по дням, вес и тренировки одним файлом — откроется в Excel или «Таблицах».</p><button id="csvBtn">Выгрузить в Excel</button><div class="note" id="csvMsg"></div></div>
+    <div class="card stack"><h2>Сервер и бот</h2>
+      ${!TG?`<p class="note" style="margin:0">Открой приложение в Telegram.</p>`
+      :!SERVER?`<p class="note" style="margin:0">Сервер не подключён. С ним бот присылает напоминания и итоги, работает фото еды, семья и поиск без VPN. Инструкция — у Claude в чате.</p>`
+      :serverInfo&&serverInfo.error?`<p class="note" style="margin:0;color:var(--warn)">Сервер не отвечает: ${esc(serverInfo.error)}</p><button id="srvRetry">Проверить снова</button>`
+      :!serverInfo?`<p class="note" style="margin:0">Подключаюсь…</p>`
+      :`<p class="small" style="margin:0">✅ Подключён${serverInfo.ai?" · фото еды доступно":" · фото еды выключено (нет ключа ИИ)"}</p>
+        <h3 class="small muted" style="margin:6px 0 0;letter-spacing:.06em">НАПОМИНАНИЯ БОТА</h3>
+        <label class="row small" style="gap:8px"><input type="checkbox" id="rmLog" ${s.log.on?"checked":""} style="width:auto"><span class="grow">Записать еду, если пусто</span><input type="time" id="rmLog1" value="${s.log.times[0]||"13:30"}" style="max-width:110px"><input type="time" id="rmLog2" value="${s.log.times[1]||"20:30"}" style="max-width:110px"></label>
+        <label class="row small" style="gap:8px"><input type="checkbox" id="rmSum" ${s.summary.on?"checked":""} style="width:auto"><span class="grow">Итог дня</span><input type="time" id="rmSumT" value="${s.summary.time}" style="max-width:110px"></label>
+        <label class="row small" style="gap:8px"><input type="checkbox" id="rmW" ${s.weigh.on?"checked":""} style="width:auto"><span class="grow">Взвешивание</span><select id="rmWd" style="max-width:90px">${["Вс","Пн","Вт","Ср","Чт","Пт","Сб"].map((d,i)=>`<option value="${i}" ${+s.weigh.day===i?"selected":""}>${d}</option>`).join("")}</select><input type="time" id="rmWt" value="${s.weigh.time}" style="max-width:110px"></label>
+        <label class="row small" style="gap:8px"><input type="checkbox" id="rmWk" ${s.weekly.on?"checked":""} style="width:auto"><span class="grow">Отчёт за неделю (воскресенье)</span><input type="time" id="rmWkT" value="${s.weekly.time}" style="max-width:110px"></label>
+        <button id="rmSave">Сохранить напоминания</button><p class="note" style="margin:0">Чтобы бот мог писать, один раз нажми в чате с ботом «Старт» (/start).</p>`}
+    </div>`;
+}
+async function saveReminders(){
+  const s={ log:{on:$("rmLog").checked,times:[$("rmLog1").value,$("rmLog2").value].filter(Boolean)}, summary:{on:$("rmSum").checked,time:$("rmSumT").value||"21:30"},
+    weigh:{on:$("rmW").checked,day:+$("rmWd").value,time:$("rmWt").value||"08:30"}, weekly:{on:$("rmWk").checked,time:$("rmWkT").value||"20:00"}, tz:-new Date().getTimezoneOffset() };
+  try{ const r=await sapi("settings",s); serverInfo.settings=r.settings; toast("Напоминания сохранены"); }catch(e){ toast("Не сохранилось: "+errText(e)); }
+}
+function bindIntegrations(){
+  document.addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return; const d=b.dataset;
+    switch(b.id){
+      case "homeBtn": try{ TG.addToHomeScreen(); }catch(err){ toast("Не получилось — обнови Telegram"); } break;
+      case "csvBtn": deliverFile(`Дневник ${today()}.csv`,"text/csv;charset=utf-8",buildCSV(),{msgEl:"csvMsg",hint:"Файл готов — открой его в «Файлах» или Excel."}); break;
+      case "srvRetry": serverInfo=null; renderServerCards(); initServer(); break;
+      case "rmSave": saveReminders(); break;
+      case "planCal": openCalendarExport(); break;
+      case "progCard": openProgressCard(); break;
+      case "famCreate": famAction("family/create",{title:($("famTitle").value||"").trim()||"Наша семья"},"Семья создана — пригласи родных"); break;
+      case "famJoin": { const c=($("famCode").value||"").trim(); if(c) famAction("family/join",{code:c},"Ты в семье!"); break; }
+      case "famLeave": if(b.dataset.sure){ famAction("family/leave",{},"Ты вышла из семьи"); } else { b.dataset.sure="1"; b.textContent="Точно выйти?"; } break;
+      case "famInvite": famInvite(); break;
+      case "famShareMenu": famShareMyMenu(); break;
+      case "famClearMenu": famAction("family/menu",{clear:true},"Меню убрано"); break;
+      case "famTakeMenu": if(famState&&famState.family.menu) handleIncoming(famState.family.menu.code); break;
+    }
+    if(d.famtake){ const it=famState&&famState.family.feed.find(x=>x.id===d.famtake); if(it) handleIncoming(it.code); }
+    if(d.msub==="family"){ famLoad(true); famStartPoll(); }
+  });
+  document.addEventListener("change",e=>{ const el=e.target;
+    if(el.dataset.fbuy!=null){ famAction("family/shop",{key:el.dataset.fbuy,bought:el.checked}); }
+    if(el.id==="aiFile"){ const f=el.files&&el.files[0]; el.value=""; if(f) openAiPhoto(f); }
+  });
+  if(TG&&TG.onEvent){ try{ TG.onEvent("homeScreenAdded",()=>toast("Иконка добавлена на экран")); }catch(e){} }
 }
 
 function bindMenu(){
@@ -2071,9 +2427,10 @@ function onReady(){
   fillProfileForm();
   go(profile()?"diary":"profile");
   checkStartParam();
+  initServer().then(()=>{ if(serverInfo&&serverInfo.family) famLoad(true); });
 }
 
-bind(); bindMenu(); updateMealSeg(); go("diary");
+bind(); bindMenu(); bindIntegrations(); updateMealSeg(); go("diary");
 Store.init();
 /* ---------- Telegram и установка ---------- */
 function applyTgTheme(){
