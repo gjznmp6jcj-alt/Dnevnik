@@ -357,7 +357,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 23</p>
+    <p class="note">Версия приложения: 2026-10-25 · 24</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1477,6 +1477,8 @@ async function runDiag(){
   ];
   const lines=[`Telegram: ${TG?"да, версия "+(TG.version||"?")+", "+(TG.platform||"?"):"нет"}`];
   if(SERVER){
+    { const t0=Date.now(); try{ const ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),15000); const r=await fetch(SERVER+"/",{cache:"no-store",signal:ctl.signal}); clearTimeout(tm); lines.push(`${r.ok?"✅":"⚠️"} Сервер дневника: ответ ${r.status}, ${Date.now()-t0} мс`); }
+      catch(e){ lines.push(`❌ Сервер дневника: ${e.name==="AbortError"?"нет ответа 15 с — адрес не открывается в этой сети":e.message}`); } out.textContent=lines.join("\n"); }
     lines.push(serverReady()?`Вход: ${TG?"через Telegram":"✅ "+((sessionUser&&sessionUser.name)||"выполнен")}`:"Вход: ❌ не выполнен — нажми «Войти через Telegram»");
     if(serverReady()){ const t0=Date.now(); try{ const j=await offViaServer("search","молоко"); lines.push(`✅ Поиск через сервер: ${(j&&j.hits||[]).length} продуктов, ${Date.now()-t0} мс`); }catch(e){ lines.push(`❌ Поиск через сервер: ${errText(e)}`); } }
     lines.push("Ниже — прямые адреса базы. Без VPN в России крестики там — это нормально, поиск идёт через сервер.");
@@ -1989,7 +1991,10 @@ async function loadConfig(){
 const serverReady=()=>!!(SERVER && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
 async function sapi(path,body,method){
   const h={"content-type":"application/json"}; if(TG&&TG.initData) h["x-tg-init"]=TG.initData; else if(sessionToken) h["x-session"]=sessionToken;
-  const r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:h,body:body?JSON.stringify(body):undefined,cache:"no-store"});
+  const ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),path.startsWith("ai/")?90000:15000);
+  let r; try{ r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:h,body:body?JSON.stringify(body):undefined,cache:"no-store",signal:ctl.signal}); }
+  catch(e){ clearTimeout(tm); throw new Error(e&&e.name==="AbortError"?"сервер не ответил за 15 секунд — похоже, его адрес не открывается в этой сети":errText(e)); }
+  clearTimeout(tm);
   let j=null; try{ j=await r.json(); }catch(e){}
   if(!r.ok){ const er=new Error((j&&j.error==="auth")?"нужно войти заново":((j&&j.error)||("сервер ответил "+r.status))); er.code=r.status; if(r.status===401&&!TG&&sessionToken) setTimeout(onSessionLost,0); throw er; }
   return j;
@@ -1997,7 +2002,8 @@ async function sapi(path,body,method){
 async function initServer(){
   await loadConfig();
   renderLoginCard();
-  if(!serverReady()){ renderServerCards(); return; }
+  renderServerCards();
+  if(!serverReady()) return;
   try{ serverInfo=await sapi("hello",{tz:-new Date().getTimezoneOffset()}); }catch(e){ serverInfo={error:errText(e)}; }
   renderServerCards(); if(tab==="diary") renderDiary();
   if(serverInfo&&!serverInfo.error){ await Sync.pull(); if(serverInfo.family) famLoad(true); }
@@ -2341,7 +2347,7 @@ function renderServerCards(){
       ${!TG&&!SERVER?`<p class="note" style="margin:0">Сервер не подключён.</p>`
       :!TG&&!sessionToken?`<p class="note" style="margin:0">Войди через Telegram — тогда здесь заработают фото еды, семья, напоминания и общие с ботом записи.</p><button class="primary" id="loginGo">Войти через Telegram</button>`
       :!SERVER?`<p class="note" style="margin:0">Сервер не подключён. С ним бот присылает напоминания и итоги, работает фото еды, семья и поиск без VPN. Инструкция — у Claude в чате.</p>`
-      :serverInfo&&serverInfo.error?`<p class="note" style="margin:0;color:var(--warn)">Сервер не отвечает: ${esc(serverInfo.error)}</p><button id="srvRetry">Проверить снова</button>`
+      :serverInfo&&serverInfo.error?`<p class="note" style="margin:0;color:var(--warn)">Сервер не отвечает: ${esc(serverInfo.error)}</p><p class="note" style="margin:0">Дневник работает и без сервера. Не будет фото еды, семьи, напоминаний и поиска без VPN. Попробуй другую сеть (Wi-Fi ↔ мобильный интернет) или VPN.</p><button id="srvRetry">Проверить снова</button>`
       :!serverInfo?`<p class="note" style="margin:0">Подключаюсь…</p>`
       :`<p class="small" style="margin:0">✅ Подключён${serverInfo.ai?" · фото еды доступно":" · фото еды выключено (нет ключа ИИ)"}</p>
         ${!TG&&sessionUser?`<div class="row small" style="justify-content:space-between">Вход: ${esc(sessionUser.name)}<button class="ghost" id="logoutBtn" style="padding:0">Выйти</button></div>`:""}
