@@ -188,7 +188,8 @@ async function onTelegram(req, env, ctx) {
       return text("ok");
     }
     await ensureUser(env, uid, m.from.first_name || "");
-    await send(env, uid, "Привет! Я дневник похудения 🌿\nЗаписывай еду, вес и тренировки в приложении — а я буду напоминать и присылать итоги дня и недели. Настроить напоминания можно в приложении: «Профиль» → «Напоминания бота».", { reply_markup: openBtn(env) });
+    await botDescribe(env);
+    await send(env, uid, introText(m.from.first_name), { reply_markup: openBtn(env, "Открыть дневник 🌿") });
   } else if (cmd === "/today") {
     const s = await userSettings(env, uid);
     await send(env, uid, await dayText(env, uid, localDate(new Date(), s.tz)), { reply_markup: openBtn(env) });
@@ -203,6 +204,32 @@ async function onTelegram(req, env, ctx) {
     await send(env, uid, "Я понимаю команды /today, /week и /stop. А всё остальное — в приложении 👇", { reply_markup: openBtn(env) });
   }
   return text("ok");
+}
+
+/* ---------------- вступление бота ---------------- */
+const BOT_DESC = "Дневник похудения 🌿\n\n🍽 Считает калории и БЖУ: пишешь продукт и граммы — остальное посчитается само\n📷 Еда по фото, штрихкоду и этикетке\n📅 Меню на неделю и список покупок\n⚖️ Вес, прогресс и прогноз до цели\n❤️ Шаги и активность из «Здоровья» на iPhone\n👨‍👩‍👧 Общее меню для семьи\n🔔 Напоминания и итоги дня и недели\n\nНажми «Старт» — и начнём.";
+const BOT_SHORT = "Считаю калории по продукту и граммам, фото и штрихкоду. Меню на неделю, вес, шаги и напоминания 🌿";
+async function botDescribe(env) {
+  if (await env.KV.get("desc:v1")) return;
+  await tg(env, "setMyDescription", { description: BOT_DESC });
+  await tg(env, "setMyShortDescription", { short_description: BOT_SHORT });
+  await env.KV.put("desc:v1", "1");
+}
+function introText(name) {
+  return `Привет${name ? ", " + esc(name) : ""}! 🌿 Я — <b>Дневник похудения</b>.
+
+Вот что я умею:
+🍽 <b>Считаю калории и БЖУ</b> — пишешь продукт и граммы, остальное посчитается само
+📷 <b>Еда по фото</b>, штрихкоду и этикетке
+📅 <b>Меню на неделю</b>, идеи блюд из того, что есть дома, и список покупок
+⚖️ <b>Вес и прогресс</b> — графики и прогноз, когда дойдёшь до цели
+❤️ <b>Шаги из «Здоровья»</b> на iPhone
+👨‍👩‍👧 <b>Семья</b> — общее меню и покупки
+🔔 <b>Напоминаю</b> записать еду и присылаю итоги дня и недели
+
+<b>С чего начать:</b> открой дневник и заполни профиль — я посчитаю твою норму калорий. В каждом разделе будут подсказки.
+
+Команды: /today — итог дня, /week — отчёт за неделю, /stop — выключить напоминания.`;
 }
 
 /* ---------------- пользователи и настройки ---------------- */
@@ -428,6 +455,7 @@ const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", 
 
 /* ---------------- напоминания и сводки (каждые 30 минут) ---------------- */
 async function runCron(env, now) {
+  try { await botDescribe(env); } catch (e) {}
   const users = await kget(env, "users", []);
   for (const uid of users) {
     try {

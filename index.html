@@ -195,6 +195,9 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
 .planhdr{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);font-weight:700;padding-top:8px}
 @media (max-width:420px){.tiles{grid-template-columns:repeat(2,1fr)}.sum{grid-template-columns:1fr;justify-items:center}.sum .kv{width:100%}}
 @media (prefers-reduced-motion:no-preference){.bar i,.path i{transition:width .4s ease}}
+.tour{position:fixed;inset:0;z-index:70}
+.tour-hole{position:fixed;border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.55);transition:all .25s ease;pointer-events:none}
+.tour-box{position:fixed;left:16px;right:16px;max-width:460px;margin:0 auto;background:var(--surface);color:var(--fg);border-radius:16px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.25);display:flex;flex-direction:column;transition:top .25s ease}
 </style>
 
 <div id="splash" aria-hidden="true"><div class="sp-in">
@@ -343,13 +346,18 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <div class="row" id="bkConfirm" hidden><span class="small grow">Текущие записи на этом устройстве заменятся данными из копии.</span><button class="grow" id="bkNo">Отмена</button><button class="primary grow" id="bkYes">Заменить</button></div>
     </div>
     <div id="integrCards" class="stack"></div>
+    <div class="card stack" id="tipsCard">
+      <h2>Подсказки</h2>
+      <label class="row small" style="gap:8px"><input type="checkbox" id="tipsOn" style="width:auto" checked><span class="grow">Показывать подсказки в разделах</span></label>
+      <button id="tipsAgain">Показать подсказки заново</button>
+    </div>
     <div class="card stack">
       <h2>Проверка связи</h2>
       <p class="note" style="margin:0">Если не работает поиск в интернете или штрихкоды — нажми и пришли скриншот результата.</p>
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 22</p>
+    <p class="note">Версия приложения: 2026-10-25 · 23</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2488,6 +2496,109 @@ const splashT0=Date.now();
 function hideSplash(){ const s=$("splash"); if(!s||s.classList.contains("hide")) return; const wait=Math.max(0,900-(Date.now()-splashT0)); setTimeout(()=>{ s.classList.add("hide"); setTimeout(()=>s.remove(),700); },wait); }
 setTimeout(hideSplash,4000); // на всякий случай
 
+/* ================= ПОДСКАЗКИ ПО РАЗДЕЛАМ ================= */
+const TIPS={
+  diary:[
+    ["#summary","Итог дня","Сколько съедено и сколько осталось до нормы. Шаги и активность из «Здоровья» и тренировки прибавляются к норме."],
+    ["#hcRun,#hcConnect","Шаги из «Здоровья»","Нажми — и шаги с активными калориями подтянутся с айфона и часов."],
+    ["#tab-diary .datebar","Другие дни","Листай дни стрелками — можно дописать вчерашнее или посмотреть прошлую неделю."],
+    ["#mealSeg","Приём пищи","Выбери, куда записать: завтрак, обед, перекус или ужин."],
+    ["#fName","Продукт и вес","Начни вводить название — калории и БЖУ посчитаются сами. Можно сразу с весом: «творог 5% 150»."],
+    ["#fScan","Штрихкод и этикетка","Отсканируй штрихкод — продукт найдётся в базе. Нет в базе — сфотографируй этикетку, цифры распознаются сами."],
+    ["#aiWrap","Фото еды","Сфотографируй тарелку — ИИ сам определит блюда, вес и калории."],
+    ["#woType","Тренировки","Добавь тренировку и минуты — сожжённые калории прибавятся к норме дня."]
+  ],
+  menu:[
+    ["#menuSeg","Разделы меню","План — меню на неделю. Блюда — твои рецепты. Идеи — что приготовить из того, что есть дома. Покупки — список продуктов. Семья — общее меню."],
+    ["#menuWeekBar","Неделя","Листай недели стрелками — можно спланировать следующую заранее."],
+    ["#menuPlan .card","План на день","Добавляй блюда в приёмы пищи. Когда съешь — перенеси в дневник одним нажатием."]
+  ],
+  progress:[
+    ["#tab-progress .card","Путь к цели","Сколько уже пройдено до желаемого веса и когда примерно дойдёшь."],
+    ["#tab-progress .chart","Графики","Как меняется вес и сколько калорий было за последние 30 дней."],
+    ["#progCard","Поделиться","Красивая карточка прогресса — для сторис или друзей."]
+  ],
+  weight:[
+    ["#wKg","Взвешивание","Раз в неделю утром натощак записывай вес. Талию — по желанию: она часто уходит, даже когда вес стоит."],
+    ["#wTable","История","Все взвешивания и изменения. Вес из «Здоровья» и умных весов тоже попадает сюда."]
+  ],
+  foods:[
+    ["#pSearch","Справочник","Почти 600 продуктов. Найди нужный и при желании поправь его значения под свою упаковку."],
+    ["#pOnline","Поиск в интернете","Не нашла в справочнике — ищи в большой базе продуктов или сканируй штрихкод."],
+    ["#pName","Свой продукт","Добавь продукт с упаковки: значения на 100 г — или сфотографируй этикетку."]
+  ],
+  profile:[
+    ["#prAge","Мои данные","Пол, возраст, рост, вес и цель — по ним считается твоя норма калорий."],
+    ["#prPace","Темп похудения","Чем быстрее темп, тем меньше норма. Ниже безопасного минимума она не опустится."],
+    ["#normCard","Твоя норма","Норма калорий, белков, жиров и углеводов и прогноз, когда дойдёшь до цели."],
+    ["#integrCards","Возможности","«Здоровье», выгрузка в Excel, напоминания бота и вход в аккаунт."],
+    ["#tipsCard","Подсказки","Здесь подсказки можно выключить или посмотреть заново."]
+  ]
+};
+let tipsReady=false, tourOn=null;
+const tipsState=()=>{ const s=Store.get("tips")||{}; return {off:!!s.off, seen:s.seen||{}}; };
+const tipsSave=s=>Store.set("tips",s);
+const tipVisible=el=>{ if(!el) return false; if(el.closest("[hidden]")) return false; const r=el.getBoundingClientRect(); return r.width>0&&r.height>0; };
+function maybeTour(t){
+  if(!tipsReady||tourOn) return;
+  const s=tipsState(); if(s.off||s.seen[t]) return;
+  if(document.querySelector(".sheet-bg")) return;
+  setTimeout(()=>{ if(tab===t&&!tourOn) startTour(t); },450);
+}
+function startTour(t){
+  const steps=(TIPS[t]||[]).map(([sel,title,text])=>{ const el=[...document.querySelectorAll(sel)].find(tipVisible); return el?{el,title,text}:null; }).filter(Boolean);
+  if(!steps.length) return;
+  tourOn={t,steps,i:0};
+  const ov=document.createElement("div"); ov.className="tour"; ov.innerHTML=`<div class="tour-hole"></div><div class="tour-box" role="dialog" aria-live="polite"></div>`;
+  document.body.appendChild(ov); tourOn.ov=ov;
+  ov.addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    if(b.dataset.t==="next"){ if(tourOn.i<tourOn.steps.length-1){ tourOn.i++; tourShow(); } else endTour(); }
+    else if(b.dataset.t==="prev"){ if(tourOn.i>0){ tourOn.i--; tourShow(); } }
+    else if(b.dataset.t==="skip") endTour();
+    else if(b.dataset.t==="off") endTour(true);
+  });
+  window.addEventListener("resize",tourPlace);
+  tourShow();
+}
+function tourShow(){
+  const {steps,i,ov}=tourOn, st=steps[i];
+  const box=ov.querySelector(".tour-box");
+  box.innerHTML=`<div class="row" style="justify-content:space-between;align-items:baseline"><b>${esc(st.title)}</b><span class="small muted num">${i+1} из ${steps.length}</span></div>
+    <p class="small" style="margin:6px 0 10px">${esc(st.text)}</p>
+    <div class="row" style="gap:8px">${i>0?`<button data-t="prev" class="grow">Назад</button>`:`<button data-t="skip" class="grow">Пропустить</button>`}<button data-t="next" class="primary grow">${i<steps.length-1?"Далее":"Понятно"}</button></div>
+    <button data-t="off" class="ghost small" style="padding:6px 0 0;align-self:flex-start">Больше не показывать подсказки</button>`;
+  const r=st.el.getBoundingClientRect();
+  if(r.top<70||r.bottom>innerHeight-220) st.el.scrollIntoView({block:"center"});
+  requestAnimationFrame(()=>requestAnimationFrame(tourPlace));
+}
+function tourPlace(){
+  if(!tourOn) return;
+  const {steps,i,ov}=tourOn, el=steps[i].el, hole=ov.querySelector(".tour-hole"), box=ov.querySelector(".tour-box");
+  const r=el.getBoundingClientRect(), pad=6;
+  Object.assign(hole.style,{top:(r.top-pad)+"px",left:(r.left-pad)+"px",width:(r.width+pad*2)+"px",height:Math.min(r.height+pad*2,innerHeight*0.6)+"px"});
+  const bh=box.offsetHeight||170, below=r.bottom+pad+12, above=r.top-pad-12-bh;
+  let top = (below+bh<innerHeight-80) ? below : (above>10 ? above : Math.max(10,innerHeight-bh-90));
+  box.style.top=top+"px";
+}
+function endTour(off){
+  if(!tourOn) return;
+  const s=tipsState(); s.seen={...s.seen,[tourOn.t]:1}; if(off) s.off=true; tipsSave(s);
+  tourOn.ov.remove(); window.removeEventListener("resize",tourPlace); tourOn=null;
+  if(off) toast("Подсказки выключены — включить можно в «Профиле»");
+  renderTipsCard();
+}
+function renderTipsCard(){
+  const el=$("tipsCard"); if(!el) return; const s=tipsState();
+  $("tipsOn").checked=!s.off;
+}
+(function hookTour(){
+  const _go=go;
+  go=function(t){ if(tourOn){ tourOn.ov.remove(); tourOn=null; } _go(t); maybeTour(t); };
+  document.addEventListener("change",e=>{ if(e.target&&e.target.id==="tipsOn"){ const s=tipsState(); s.off=!e.target.checked; tipsSave(s); toast(s.off?"Подсказки выключены":"Подсказки включены"); } });
+  document.addEventListener("click",e=>{ const b=e.target.closest&&e.target.closest("#tipsAgain"); if(!b) return; const s=tipsState(); s.off=false; s.seen={}; tipsSave(s); renderTipsCard(); go("diary"); });
+})();
+
 function bindMenu(){
   $("wPrev").onclick=()=>{ menuWeek=addDays(menuWeek,-7); menuDay=addDays(menuDay,-7); copyMode=false; clearAsk=false; renderMenu(); };
   $("wNext").onclick=()=>{ menuWeek=addDays(menuWeek,7); menuDay=addDays(menuDay,7); copyMode=false; clearAsk=false; renderMenu(); };
@@ -2640,6 +2751,7 @@ function onReady(){
   go(profile()?"diary":"profile");
   if(/[?&]install=1/.test(location.search) && !TG && !IS_STANDALONE) go("profile");
   hideSplash();
+  setTimeout(()=>{ tipsReady=true; renderTipsCard(); maybeTour(tab); },1700);
   checkStartParam();
   initServer();
 }
