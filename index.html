@@ -304,7 +304,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 7</p>
+    <p class="note">Версия приложения: 2026-10-25 · 9</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -940,10 +940,20 @@ function offToFood(p){
 async function offSearch(q){
   const ok=f=>f&&f.name&&f.kcal!=null;
   let err=null;
-  try{
-    const j=await fetchJSON(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q)}&page_size=40&langs=ru,en&fields=${OFF_FIELDS}`);
-    if(j&&Array.isArray(j.hits)) return j.hits.map(offToFood).filter(ok);
-  }catch(e){ err=e; }
+  // сначала продукты, которые продаются в России, потом все остальные
+  const sa=extra=>fetchJSON(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q+extra)}&page_size=40&langs=ru,en&fields=${OFF_FIELDS},countries_tags`);
+  const [ru,all]=await Promise.allSettled([sa(' countries_tags:"en:russia"'),sa("")]);
+  const lists=[ru,all].filter(x=>x.status==="fulfilled"&&x.value&&Array.isArray(x.value.hits));
+  if(lists.length){
+    const seen=new Set(), outRu=[], outOther=[];
+    lists.forEach(x=>x.value.hits.forEach(h=>{
+      const f=offToFood(h); if(!ok(f)) return; const key=f.code||norm(f.name); if(seen.has(key)) return; seen.add(key);
+      const isRu=Array.isArray(h.countries_tags)&&h.countries_tags.includes("en:russia");
+      (isRu?outRu:outOther).push({...f,ru:isRu});
+    }));
+    return outRu.concat(outOther);
+  }
+  err=(ru.reason||all.reason);
   try{
     const j=await fetchJSON(`${OFF}/api/v2/search?search_terms=${encodeURIComponent(q)}&page_size=30&fields=${OFF_FIELDS}`);
     if(j&&Array.isArray(j.products)) return j.products.map(offToFood).filter(ok);
@@ -981,7 +991,7 @@ function openFoodConfirm(f,onPick,note){
 function openOnlineSearch(q,onPick){
   openSheet2(`<div class="row" style="justify-content:space-between"><h2>Поиск в интернете</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
     <div class="row"><input id="osQ" class="grow" style="flex:1 1 160px" value="${esc(q||"")}" placeholder="Например, «творог Простоквашино»" aria-label="Что найти"><button class="primary" id="osGo">Найти</button></div>
-    <p class="note" style="margin:0">База Open Food Facts: в основном продукты в упаковке, с КБЖУ от покупателей. Перед сохранением проверь цифры.</p>
+    <p class="note" style="margin:0">База Open Food Facts: продукты в упаковке, КБЖУ вносят покупатели. Сверху — продающиеся в России (метка RU). Перед сохранением сверь цифры с упаковкой.</p>
     <div id="osRes" class="stack" style="gap:0"></div>`);
   let res=[];
   const run=async()=>{
@@ -990,7 +1000,7 @@ function openOnlineSearch(q,onPick){
     try{
       res=await offSearch(qq);
       if(!$("osRes")) return;
-      $("osRes").innerHTML = res.length ? `<div class="plist" style="max-height:none">${res.map((f,i)=>`<button type="button" data-osi="${i}"><span>${esc(f.name)}${f.qty?` <span class="small muted">${esc(f.qty)}</span>`:""}</span><small class="num">${fmt(f.kcal)} ккал</small></button>`).join("")}</div>`
+      $("osRes").innerHTML = res.length ? `<div class="plist" style="max-height:none">${res.map((f,i)=>`<button type="button" data-osi="${i}"><span>${esc(f.name)}${f.qty?` <span class="small muted">${esc(f.qty)}</span>`:""}${f.ru?' <span class="tag">RU</span>':""}</span><small class="num">${fmt(f.kcal)} ккал</small></button>`).join("")}</div>`
         : `<div class="empty">Ничего не нашлось. Попробуй короче или по-другому, например без бренда.</div>`;
     }catch(e){ if($("osRes")) $("osRes").innerHTML=`<div class="empty">Не получилось подключиться к базе продуктов. Скорее всего, у тебя она открывается только через VPN — включи его и попробуй снова.</div>`; }
   };
@@ -1010,16 +1020,47 @@ function zxReader(Z){
   h.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13,Z.BarcodeFormat.EAN_8,Z.BarcodeFormat.UPC_A,Z.BarcodeFormat.UPC_E,Z.BarcodeFormat.CODE_128]);
   return new Z.BrowserMultiFormatReader(h);
 }
+function eanValid(code){
+  if(!/^\d+$/.test(code)) return false;
+  if(![8,12,13].includes(code.length)) return code.length>=6; // code128 и прочие — без проверки
+  const d=code.split("").map(Number), chk=d.pop(); let sum=0;
+  d.reverse().forEach((n,i)=>{ sum+=n*(i%2===0?3:1); });
+  return (10-sum%10)%10===chk;
+}
 async function decodeImageFile(file){
   const url=URL.createObjectURL(file);
   try{
     const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
-    if("BarcodeDetector" in window){ try{ const det=new window.BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128"]}); const r=await det.detect(img); if(r&&r[0]) return r[0].rawValue; }catch(e){} }
-    const Z=await loadZXing(), reader=zxReader(Z);
-    for(const max of [1280,800,1800]){
-      const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)), c=document.createElement("canvas");
-      c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc); c.getContext("2d").drawImage(img,0,0,c.width,c.height);
-      try{ const r=await reader.decodeFromImageUrl(c.toDataURL("image/jpeg",0.92)); if(r) return r.getText?r.getText():r.text; }catch(e){}
+    if("BarcodeDetector" in window){ try{ const det=new window.BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128"]}); const r=await det.detect(img); const v=r&&r.find(x=>eanValid(x.rawValue)); if(v) return v.rawValue; }catch(e){} }
+    const Z=await loadZXing();
+    const W=img.naturalWidth, H=img.naturalHeight;
+    const hints=new Map(); hints.set(Z.DecodeHintType.TRY_HARDER,true);
+    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13,Z.BarcodeFormat.EAN_8,Z.BarcodeFormat.UPC_A,Z.BarcodeFormat.UPC_E,Z.BarcodeFormat.CODE_128]);
+    const core = Z.MultiFormatReader && Z.HTMLCanvasElementLuminanceSource && Z.BinaryBitmap && Z.HybridBinarizer;
+    const mfr = core ? new Z.MultiFormatReader() : null; if(mfr) mfr.setHints(hints);
+    const fallback = core ? null : zxReader(Z);
+    const bins=[Z.HybridBinarizer,Z.GlobalHistogramBinarizer].filter(Boolean);
+    // [x,y,w,h] доли кадра: весь, средняя полоса, узкая середина, почти весь
+    const crops=[[0,0,1,1],[0,0.25,1,0.5],[0.08,0.33,0.84,0.34],[0.05,0.1,0.9,0.8],[0,0,1,0.5],[0,0.5,1,0.5]];
+    const c=document.createElement("canvas"), ctx=c.getContext("2d",{willReadFrequently:true});
+    const tick=()=>new Promise(r=>setTimeout(r,0));
+    for(const max of [1200,900,1600,650]){
+      for(const rot of [0,90]){
+        for(const [cx,cy,cw,ch] of crops){
+          const sx=cx*W, sy=cy*H, sw=cw*W, sh=ch*H, sc=Math.min(1,max/Math.max(sw,sh)), dw=Math.max(1,Math.round(sw*sc)), dh=Math.max(1,Math.round(sh*sc));
+          c.width=rot?dh:dw; c.height=rot?dw:dh;
+          ctx.save(); ctx.fillStyle="#fff"; ctx.fillRect(0,0,c.width,c.height); ctx.translate(c.width/2,c.height/2); if(rot) ctx.rotate(Math.PI/2);
+          ctx.filter="grayscale(1) contrast(1.4)"; ctx.drawImage(img,sx,sy,sw,sh,-dw/2,-dh/2,dw,dh); ctx.restore();
+          if(mfr){
+            for(const Bin of bins){
+              try{ const r=mfr.decode(new Z.BinaryBitmap(new Bin(new Z.HTMLCanvasElementLuminanceSource(c)))); const t=r&&(r.getText?r.getText():r.text); if(t&&eanValid(t)) return t; }catch(e){}
+            }
+          } else {
+            try{ const r=await fallback.decodeFromImageUrl(c.toDataURL("image/jpeg",0.92)); const t=r&&(r.getText?r.getText():r.text); if(t&&eanValid(t)) return t; }catch(e){}
+          }
+          await tick();
+        }
+      }
     }
     return null;
   } finally { URL.revokeObjectURL(url); }
@@ -1028,11 +1069,13 @@ function openScanner(onPick){
   openSheet2(`<div class="row" style="justify-content:space-between"><h2>Штрихкод</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
     <div id="scLive" hidden><video id="scVideo" playsinline muted style="width:100%;border-radius:12px;background:#000;aspect-ratio:4/3;object-fit:cover"></video><p class="note" style="margin:6px 0 0">Наведи камеру на штрихкод — он распознается сам.</p></div>
     <label class="primary" id="scPhotoBtn" style="display:block;text-align:center;background:var(--accent);color:var(--accent-ink);border-radius:10px;padding:12px 14px;font-weight:700;cursor:pointer">Сфотографировать штрихкод<input type="file" accept="image/*" capture="environment" id="scFile" hidden></label>
+    <p class="note" style="margin:0">Как снять, чтобы распозналось: поднеси телефон близко, чтобы штрихкод занял почти всю ширину кадра, держи ровно, без бликов и тени.</p>
     <div class="row"><input id="scCode" class="grow" style="flex:1 1 150px" inputmode="numeric" placeholder="или введи цифры под штрихкодом" aria-label="Цифры штрихкода"><button id="scFind">Найти</button></div>
     <div id="scMsg" class="small"></div>`);
   const msg=t=>{ const m=$("scMsg"); if(m) m.innerHTML=t; };
   const handle=async code=>{
     code=String(code||"").replace(/\D/g,""); if(code.length<6){ msg("Не похоже на штрихкод — проверь цифры."); return; }
+    if([8,12,13].includes(code.length) && !eanValid(code)){ msg(`В цифрах ${code} где-то опечатка (не сходится контрольная цифра). Проверь их.`); return; }
     if(scanStop){ try{ scanStop(); }catch(e){} scanStop=null; }
     const local=customFoods().find(x=>x.code===code);
     if(local){ closeSheet2(); toast(`Нашёлся: ${local.name}`); onPick&&onPick({...local,custom:true}); return; }
@@ -1049,8 +1092,8 @@ function openScanner(onPick){
   $("scCode").onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); handle($("scCode").value); } };
   $("scFile").onchange=async e=>{
     const file=e.target.files&&e.target.files[0]; if(!file) return;
-    msg("Распознаю…");
-    try{ const code=await decodeImageFile(file); if(code){ $("scCode").value=code; handle(code); } else msg("Не удалось разглядеть штрихкод. Сфотографируй ближе, ровно и при хорошем свете — или введи цифры."); }
+    msg("Распознаю… это может занять пару секунд.");
+    try{ const code=await decodeImageFile(file); if(code){ $("scCode").value=code; handle(code); } else { msg("Не получилось разглядеть штрихкод. Попробуй ещё раз ближе и ровнее — или просто впиши цифры под полосками в поле ниже, это так же точно."); setTimeout(()=>$("scCode")&&$("scCode").focus(),50); } }
     catch(err){ msg("Не загрузился распознаватель. Проверь интернет или введи цифры вручную."); }
     e.target.value="";
   };
