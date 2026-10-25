@@ -57,6 +57,8 @@ h2{font-family:var(--display);font-weight:500;font-size:15px;letter-spacing:.01e
 .row>*{min-width:0}
 .grow{flex:1 1 0}
 .stack>label.f{flex:none}
+.labelbtn{display:block;text-align:center;background:var(--surface2);color:var(--fg);border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+details{margin-top:6px;color:var(--muted)}details summary{cursor:pointer}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em;flex:1 1 120px;min-width:0}
 input,select,button{font:inherit;color:inherit}
 input,select{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;font-size:16px;min-width:0}
@@ -199,6 +201,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <div class="row">
         <button class="primary grow" id="fAdd" disabled>Добавить</button>
         <button id="fScan" aria-label="Сканировать штрихкод">Штрихкод</button>
+        <button id="fLabel" aria-label="Сфотографировать этикетку">Этикетка</button>
       </div>
       <div id="dishWrap" hidden><div class="note" style="margin-bottom:6px">Мои блюда</div><div class="chips" id="dishChips"></div></div>
       <div id="recentWrap" hidden><div class="note" style="margin-bottom:6px">Недавние</div><div class="chips" id="recent"></div></div>
@@ -257,6 +260,8 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
         <label class="f">Жиры<input type="number" inputmode="decimal" id="pF"></label>
         <label class="f">Углев.<input type="number" inputmode="decimal" id="pC"></label>
       </div>
+      <div id="pLabelWrap"></div>
+      <div class="note" id="pLabelMsg"></div>
       <button class="primary" id="pAdd">Сохранить продукт</button>
     </div>
     <div class="card stack">
@@ -304,7 +309,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 9</p>
+    <p class="note">Версия приложения: 2026-10-25 · 11</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -759,11 +764,13 @@ function openNewFood(name){
       <label class="f">Жиры<input type="number" inputmode="decimal" id="nF"></label>
       <label class="f">Углев.<input type="number" inputmode="decimal" id="nC"></label>
     </div>
+    ${labelBtnHTML("nLabel")}
     ${sampleFn?`<button id="nAsk">Подставить средние значения от Claude</button>`:""}
     <div class="note" id="nMsg"></div>
     <div class="row"><button class="grow" id="nCancel">Отмена</button><button class="primary grow" id="nSave">Сохранить и выбрать</button></div>
   </div></div>`;
   $("nK").focus();
+  bindLabelScan("nLabel",{k:"nK",p:"nP",f:"nF",c:"nC"},"nMsg");
   $("sbg").addEventListener("click",e=>{ if(e.target.id==="sbg"||e.target.id==="nCancel") $("sheetRoot").innerHTML=""; });
   $("nSave").onclick=()=>{
     const f={name:$("nName").value.trim(),kcal:num($("nK").value),p:num($("nP").value)||0,f:num($("nF").value)||0,c:num($("nC").value)||0};
@@ -914,6 +921,114 @@ function renderNorm(){
   </div>${c.limited?`<p class="banner small" style="margin:10px 0 0">Для темпа ${fmt(c.rate,2)} кг в неделю норма опустилась бы ниже ${c.floor} ккал. Поэтому стоит минимум ${c.floor} ккал, и реальный темп — около ${fmt(c.weekly,2)} кг в неделю. Ускорить можно тренировками: сожжённое на них добавляется к норме дня.</p>`:""}<p class="note" style="margin:10px 0 0">Норма пересчитывается по последнему взвешиванию. Безопасным обычно считают темп до 1 кг в неделю.</p>`;
 }
 
+/* ---------- РАЗБОР ЭТИКЕТКИ: текст → ккал/Б/Ж/У на 100 г ---------- */
+const LAT2CYR={a:"а",c:"с",e:"е",o:"о",p:"р",x:"х",k:"к",m:"м",t:"т",h:"н",b:"в",y:"у",r:"г"};
+const CYR2LAT={"а":"a","с":"c","е":"e","о":"o","р":"p","х":"x","к":"k","м":"m","т":"t","н":"h","в":"b","у":"y","г":"r","і":"i"};
+const NUM="(\\d{1,4}(?:[.,]\\d{1,2})?)";
+function labelNum(s){ return parseFloat(String(s).replace(",",".")); }
+function parseNutrition(raw){
+  let t=String(raw||"").toLowerCase().replace(/\r/g," ").replace(/[ \t]+/g," ");
+  // типичные ошибки OCR внутри чисел: o→0, l/i→1, з→3 рядом с цифрами
+  t=t.replace(/(\d)[oо](?=\d|[.,\s]|г|g)/g,"$10").replace(/(\d)[,.]\s+(\d)/g,"$1,$2").replace(/(\d)\s*[lі|](?=\d)/g,"$11");
+  const cy=t.replace(/[a-z]/g,ch=>LAT2CYR[ch]||ch);   // для русских слов
+  const la=t.replace(/[а-яё]/g,ch=>CYR2LAT[ch]||ch);  // для латиницы
+  const grab=(src,re)=>{ const m=src.match(re); return m? labelNum(m[m.length-1]) : null; };
+  const first=(...vals)=>vals.find(v=>v!=null&&!isNaN(v));
+  const gap="[^\\d\\n]{0,28}?";
+  const out={};
+  // калории
+  let kcal=first(
+    grab(cy, new RegExp("кдж\\s*/\\s*ккал"+gap+"\\d{2,4}(?:[.,]\\d)?\\s*/\\s*"+NUM)),
+    grab(la, new RegExp("kj\\s*/\\s*kcal"+gap+"\\d{2,4}(?:[.,]\\d)?\\s*/\\s*"+NUM)),
+    (()=>{ const m=cy.match(new RegExp("ккал\\s*/\\s*кдж"+gap+NUM)); return m?labelNum(m[1]):null; })(),
+    (()=>{ const m=la.match(new RegExp("kcal\\s*/\\s*kj"+gap+NUM)); return m?labelNum(m[1]):null; })(),
+    grab(cy, new RegExp(NUM+"\\s*ккал")),
+    grab(la, new RegExp(NUM+"\\s*k\\s?cal")),
+    grab(cy, new RegExp("(?:калорийност|энергетическ)\\S*"+gap+NUM+"(?!\\s*кдж)")),
+  );
+  if(kcal==null){ const kj=first(grab(cy,new RegExp(NUM+"\\s*кдж")), grab(la,new RegExp(NUM+"\\s*kj"))); if(kj!=null) kcal=kj/4.184; }
+  // белки / жиры / углеводы — первое число после ключевого слова
+  const p=first(grab(cy,new RegExp("(?:белк|белок|протеин)\\S*"+gap+NUM)),
+    grab(la,new RegExp("(?:protein|proteine|protéines|proteines|proteínas|proteinas|proteine|eiwei|eiweiss|bia[lł]k|bilkovin|bílkovin|feh[eé]rje)\\S*"+gap+NUM)));
+  const f=first(grab(cy,new RegExp("(?:^|[^а-я])жир\\S*"+gap+NUM)),
+    grab(la,new RegExp("(?:^|[^a-z])(?:fat|fats|total fat|fett|lipides|mati[eè]res grasses|grassi|grasas|gorduras|t[lł]uszcz|tuky|tuk|zs[ií]r|vet)\\b\\S*"+gap+NUM)));
+  const c=first(grab(cy,new RegExp("углевод\\S*"+gap+NUM)),
+    grab(la,new RegExp("(?:carbohydrate|carbohydrates|total carbohydrate|carbs|kohlenhydrat|glucides|carboidrati|hidratos de carbono|carboidratos|w[eę]glowodan|sacharid|szénhidr[aá]t|koolhydraten)\\S*"+gap+NUM)));
+  out.kcal=kcal!=null?Math.round(kcal):null; out.p=p; out.f=f; out.c=c;
+  // проверка правдоподобия
+  const est=(p||0)*4+(f||0)*9+(c||0)*4;
+  if(out.kcal==null && (p!=null||f!=null||c!=null)) { out.kcal=Math.round(est); out.kcalEstimated=true; }
+  out.warn = [];
+  if(out.kcal!=null && (out.kcal>950)) out.warn.push("калорий больше 900 на 100 г");
+  if((p||0)+(f||0)+(c||0)>101) out.warn.push("сумма Б+Ж+У больше 100 г");
+  if(out.kcal && est && !out.kcalEstimated && Math.abs(est-out.kcal)/out.kcal>0.35) out.warn.push("калории не сходятся с БЖУ — возможно, цифры прочитались неточно или таблица на порцию");
+  out.found=[out.kcal,p,f,c].filter(v=>v!=null).length;
+  return out;
+}
+
+/* ---------- РАСПОЗНАВАНИЕ ЭТИКЕТКИ (Tesseract.js, работает на телефоне) ---------- */
+let tessP=null, ocrWorkerP=null, ocrLogger=null;
+function loadTesseract(){
+  if(window.Tesseract) return Promise.resolve(window.Tesseract);
+  if(!tessP) tessP=new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"; s.onload=()=>window.Tesseract?res(window.Tesseract):rej(new Error("no tesseract")); s.onerror=()=>{ tessP=null; rej(new Error("load")); }; document.head.appendChild(s); });
+  return tessP;
+}
+const ocrWorkers={};
+const ocrLang=()=>{ try{ return localStorage.getItem("ocrLang")||"rus"; }catch(e){ return "rus"; } };
+function getOcrWorker(lang){
+  lang=lang||ocrLang();
+  if(!ocrWorkers[lang]) ocrWorkers[lang]=(async()=>{ const T=await loadTesseract(); return await T.createWorker(lang,1,{logger:m=>{ try{ ocrLogger&&ocrLogger(m); }catch(e){} }}); })().catch(e=>{ delete ocrWorkers[lang]; throw e; });
+  return ocrWorkers[lang];
+}
+function warmOcr(){ getOcrWorker().catch(()=>{}); }
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
+async function ocrImageFile(file,onProgress){
+  ocrLogger=onProgress;
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+    const sc=Math.min(1,2000/Math.max(img.naturalWidth,img.naturalHeight)), c=document.createElement("canvas");
+    c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc);
+    const ctx=c.getContext("2d"); ctx.filter="grayscale(1) contrast(1.35)"; ctx.drawImage(img,0,0,c.width,c.height);
+    const w=await withTimeout(getOcrWorker(),180000);
+    const r=await withTimeout(w.recognize(c),90000);
+    return (r&&r.data&&r.data.text)||"";
+  } finally { URL.revokeObjectURL(url); ocrLogger=null; }
+}
+function labelBtnHTML(id,text){
+  const L=ocrLang();
+  return `<div class="stack" style="gap:6px"><label class="labelbtn" for="${id}" data-warm="1">${text||"Заполнить с фото этикетки"}<input type="file" accept="image/*" capture="environment" id="${id}" hidden></label>
+    <div class="row small muted" style="gap:6px;justify-content:center">Язык этикетки:<select id="${id}Lang" aria-label="Язык этикетки" style="width:auto;padding:4px 8px;font-size:14px"><option value="rus"${L==="rus"?" selected":""}>русский</option><option value="eng"${L==="eng"?" selected":""}>латиница (EN, DE, FR, IT, ES, PL…)</option></select></div></div>`;
+}
+/* fields: {k,p,f,c} — id полей ввода; msgId — куда писать статус */
+function bindLabelScan(inputId,fields,msgId){
+  const inp=$(inputId); if(!inp) return;
+  const langSel=$(inputId+"Lang"); if(langSel) langSel.onchange=()=>{ try{ localStorage.setItem("ocrLang",langSel.value); }catch(e){} };
+  const lbl=inp.closest("label"); if(lbl) lbl.addEventListener("click",()=>warmOcr());
+  const msg=(h,warn)=>{ const m=$(msgId); if(m){ m.innerHTML=h; m.style.color=warn?"var(--warn)":"var(--muted)"; } };
+  inp.onchange=async e=>{
+    const file=e.target.files&&e.target.files[0]; e.target.value=""; if(!file) return;
+    const t0=Date.now(); let phase="load";
+    const tickMsg=()=>{ if(phase==="load") msg(`Загружаю распознаватель… ${Math.round((Date.now()-t0)/1000)} с. В первый раз это до минуты, потом — мгновенно.`); };
+    tickMsg(); const timer=setInterval(tickMsg,1000);
+    try{
+      const text=await ocrImageFile(file,m=>{
+        if(m.status==="recognizing text"){ phase="read"; msg(`Читаю этикетку… ${Math.round((m.progress||0)*100)}%`); }
+      }).finally(()=>clearInterval(timer));
+      const r=parseNutrition(text);
+      if(!r.found){ msg(`Не нашла на фото калории и БЖУ. Сфотографируй поближе только таблицу «Пищевая ценность», ровно и без бликов.${text.trim()?` <details><summary>Что удалось прочитать</summary>${esc(text.slice(0,600))}</details>`:""}`,true); return; }
+      const set=(id,v)=>{ if(v!=null&&$(id)) $(id).value=r1(v); };
+      set(fields.k,r.kcal); set(fields.p,r.p); set(fields.f,r.f); set(fields.c,r.c);
+      const miss=[["калории",r.kcal],["белки",r.p],["жиры",r.f],["углеводы",r.c]].filter(x=>x[1]==null).map(x=>x[0]);
+      const notes=[];
+      if(r.kcalEstimated) notes.push("калорий на этикетке не нашла — посчитала по БЖУ");
+      if(miss.length) notes.push("не нашла: "+miss.join(", ")+" — впиши вручную");
+      r.warn.forEach(w=>notes.push(w));
+      msg(`Цифры подставлены — сверь их с этикеткой (нужны значения на 100 г).${notes.length?"<br>"+notes.map(esc).join("<br>"):""} <details><summary>Распознанный текст</summary>${esc(text.slice(0,800))}</details>`, notes.length>0);
+    }catch(err){ msg(err&&err.message==="timeout" ? "Распознаватель слишком долго загружается. Попробуй через Wi-Fi или с выключенным VPN (ему VPN не нужен) — после первой загрузки он сохранится на телефоне." : "Не загрузился распознаватель текста. Проверь интернет и попробуй ещё раз.",true); }
+  };
+}
+
 /* ---------- ОНЛАЙН: Open Food Facts и сканер штрихкодов ---------- */
 const OFF="https://world.openfoodfacts.org";
 const OFF_FIELDS="code,product_name,product_name_ru,brands,quantity,nutriments";
@@ -925,7 +1040,7 @@ function closeSheet2(){ if(scanStop){ try{ scanStop(); }catch(e){} scanStop=null
 let scanStop=null;
 async function fetchJSON(url,ms=15000){
   const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),ms);
-  try{ const r=await fetch(url,{signal:ctl.signal}); if(r.status===404) return null; if(!r.ok) throw new Error("http "+r.status); return await r.json(); }
+  try{ const r=await fetch(url,{signal:ctl.signal,method:method||"GET"}); if(r.status===404) return null; if(!r.ok) throw new Error("http "+r.status); return await r.json(); }
   finally{ clearTimeout(t); }
 }
 function offToFood(p){
@@ -977,8 +1092,11 @@ function openFoodConfirm(f,onPick,note){
       <label class="f">Жиры<input type="number" inputmode="decimal" id="cfF" value="${f.kcal!=null?f.f:""}"></label>
       <label class="f">Углев.<input type="number" inputmode="decimal" id="cfC" value="${f.kcal!=null?f.c:""}"></label>
     </div>
+    ${labelBtnHTML("cfLabel")}
     <div class="note" id="cfMsg" style="color:var(--warn)"></div>
     <div class="row"><button class="grow" data-close2>Отмена</button><button class="primary grow" id="cfSave">Сохранить</button></div>`);
+  bindLabelScan("cfLabel",{k:"cfK",p:"cfP",f:"cfF",c:"cfC"},"cfMsg");
+  if(f.autoLabel){ try{ $("cfLabel").click(); }catch(e){} }
   setTimeout(()=>{ const el=f.name?(f.kcal==null?$("cfK"):null):$("cfName"); el&&el.focus(); },60);
   $("cfSave").onclick=()=>{
     const nf={name:$("cfName").value.trim(),kcal:num($("cfK").value),p:num($("cfP").value)||0,f:num($("cfF").value)||0,c:num($("cfC").value)||0,code:f.code||undefined};
@@ -1071,7 +1189,9 @@ function openScanner(onPick){
     <label class="primary" id="scPhotoBtn" style="display:block;text-align:center;background:var(--accent);color:var(--accent-ink);border-radius:10px;padding:12px 14px;font-weight:700;cursor:pointer">Сфотографировать штрихкод<input type="file" accept="image/*" capture="environment" id="scFile" hidden></label>
     <p class="note" style="margin:0">Как снять, чтобы распозналось: поднеси телефон близко, чтобы штрихкод занял почти всю ширину кадра, держи ровно, без бликов и тени.</p>
     <div class="row"><input id="scCode" class="grow" style="flex:1 1 150px" inputmode="numeric" placeholder="или введи цифры под штрихкодом" aria-label="Цифры штрихкода"><button id="scFind">Найти</button></div>
-    <div id="scMsg" class="small"></div>`);
+    <div id="scMsg" class="small"></div>
+    <button class="ghost" id="scNoCode" style="align-self:flex-start;padding-left:0">Нет штрихкода? Сфотографируй этикетку с КБЖУ</button>`);
+  $("scNoCode").onclick=()=>warmOcr()||openFoodConfirm({name:"",kcal:null,code:"",autoLabel:true},onPick,"Сфотографируй таблицу «Пищевая ценность» — калории и БЖУ подставятся сами. Название впиши вручную.");
   const msg=t=>{ const m=$("scMsg"); if(m) m.innerHTML=t; };
   const handle=async code=>{
     code=String(code||"").replace(/\D/g,""); if(code.length<6){ msg("Не похоже на штрихкод — проверь цифры."); return; }
@@ -1084,8 +1204,8 @@ function openScanner(onPick){
       const f=await offByCode(code);
       if(!$("sheetRoot2").innerHTML) return;
       if(f&&f.name&&f.kcal!=null) openFoodConfirm(f,onPick,"Нашёлся в базе. Проверь цифры с упаковкой и сохрани — в следующий раз он найдётся мгновенно.");
-      else if(f&&f.name) openFoodConfirm(f,onPick,"Продукт есть в базе, но без калорийности. Впиши КБЖУ с упаковки один раз.");
-      else openFoodConfirm({name:"",kcal:null,code},onPick,`Штрихкода ${code} нет в базе. Впиши данные с упаковки один раз — дальше он будет находиться сам.`);
+      else if(f&&f.name) openFoodConfirm(f,onPick,"Продукт есть в базе, но без калорийности. Сфотографируй этикетку с КБЖУ или впиши цифры один раз.");
+      else openFoodConfirm({name:"",kcal:null,code},onPick,`Штрихкода ${code} нет в базе. Сфотографируй этикетку с КБЖУ кнопкой ниже или впиши цифры — один раз, дальше он будет находиться сам.`);
     }catch(e){ msg("Не получилось подключиться к базе продуктов — похоже, она открывается только через VPN. Включи VPN и нажми «Найти» ещё раз, или впиши данные с упаковки: <button class=\"ghost\" id=\"scManual\" style=\"padding:0\">ввести вручную</button>"); const mb=$("scManual"); if(mb) mb.onclick=()=>openFoodConfirm({name:"",kcal:null,code},onPick,`Штрихкод ${code} сохранится вместе с продуктом — в следующий раз найдётся сам, без интернета.`); }
   };
   $("scFind").onclick=()=>handle($("scCode").value);
@@ -1115,12 +1235,15 @@ async function runDiag(){
     ["Поиск (новый адрес)","https://search.openfoodfacts.org/search?q=milk&page_size=1&fields=code"],
     ["Штрихкоды","https://world.openfoodfacts.org/api/v2/product/3017620422003.json?fields=code"],
     ["Поиск (запасной)","https://world.openfoodfacts.org/api/v2/search?search_terms=milk&page_size=1&fields=code"],
-    ["Распознаватель","https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/package.json"]
+    ["Распознаватель штрихкодов","https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/package.json"],
+    ["Распознаватель текста","https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/package.json"],
+    ["Ядро распознавания","https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/package.json"],
+    ["Русский язык (≈10 МБ)","https://cdn.jsdelivr.net/npm/@tesseract.js-data/rus/4.0.0_best_int/rus.traineddata.gz","HEAD"]
   ];
   const lines=[`Telegram: ${TG?"да, версия "+(TG.version||"?")+", "+(TG.platform||"?"):"нет"}`];
-  for(const [name,url] of tests){
+  for(const [name,url,method] of tests){
     const t0=Date.now();
-    try{ const ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),15000); const r=await fetch(url,{signal:ctl.signal}); clearTimeout(tm); lines.push(`${r.ok?"✅":"⚠️"} ${name}: ответ ${r.status}, ${Date.now()-t0} мс`); }
+    try{ const ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),15000); const r=await fetch(url,{signal:ctl.signal,method:method||"GET"}); clearTimeout(tm); lines.push(`${r.ok?"✅":"⚠️"} ${name}: ответ ${r.status}, ${Date.now()-t0} мс`); }
     catch(e){ lines.push(`❌ ${name}: ${e.name==="AbortError"?"нет ответа 15 с":(e.name+": "+e.message)}`); }
     out.textContent=lines.join("\n");
   }
@@ -1173,7 +1296,8 @@ function mountPicker(root,opts){
     <input class="pk-g" type="number" inputmode="decimal" placeholder="г" aria-label="Граммы" style="flex:1 1 70px;max-width:100px"></div>
     <div class="plist pk-list"></div><div class="chips pk-port" hidden></div><div class="preview pk-prev"></div>
     <button class="primary pk-add" disabled>${opts.addLabel}</button>
-    <div class="row" style="gap:6px"><button type="button" class="ghost pk-scan" style="padding-left:0">Штрихкод</button><button type="button" class="ghost pk-online">Найти в интернете</button></div>`;
+    <div class="note" style="margin:0">Нет в списке? Добавь со сканера:</div>
+    <div class="row" style="gap:6px"><button type="button" class="grow pk-scan">Штрихкод</button><button type="button" class="grow pk-label">Этикетка</button><button type="button" class="grow pk-online">Интернет</button></div>`;
   const q=root.querySelector(".pk-q"), g=root.querySelector(".pk-g"), list=root.querySelector(".pk-list"), port=root.querySelector(".pk-port"), prev=root.querySelector(".pk-prev"), add=root.querySelector(".pk-add");
   let sel=null, arr=[];
   function draw(){
@@ -1190,9 +1314,10 @@ function mountPicker(root,opts){
     prev.innerHTML = sel&&gv ? `${esc(sel.name)}, ${fmt(gv)} г → <b>${fmt(sel.kcal*gv/100)} ккал</b> · Б ${fmt(sel.p*gv/100,1)} · Ж ${fmt(sel.f*gv/100,1)} · У ${fmt(sel.c*gv/100,1)}` : sel ? "Укажи вес в граммах." : "";
     add.disabled=!(sel&&gv>0);
   }
-  const choose=f=>{ sel=f; q.value=f.name; if(!g.value) g.value=f.dish?Math.round(f.portionG):(f.lastG||100); draw(); g.focus(); g.select(); };
+  const choose=f=>{ sel=f; q.value=f.name; g.value=f.dish?Math.round(f.portionG):(f.lastG||""); draw(); setTimeout(()=>{ g.focus(); g.select(); },80); };
   root.querySelector(".pk-scan").onclick=()=>openScanner(choose);
   root.querySelector(".pk-online").onclick=()=>openOnlineSearch(q.value.trim(),choose);
+  root.querySelector(".pk-label").onclick=()=>{ warmOcr(); openFoodConfirm({name:"",kcal:null,code:"",autoLabel:true},choose,"Сфотографируй таблицу «Пищевая ценность» — калории и БЖУ подставятся сами. Впиши название и сохрани, потом укажи граммы."); };
   list.onclick=e=>{ const b=e.target.closest("button[data-k]"); if(!b) return; sel=arr[+b.dataset.k]; q.value=sel.name; if(!g.value) g.value=sel.dish?Math.round(sel.portionG):(sel.lastG||100); draw(); g.focus(); g.select(); };
   port.onclick=e=>{ const b=e.target.closest("button[data-n]"); if(!b||!sel) return; g.value=Math.round(sel.portionG*+b.dataset.n); draw(); };
   q.oninput=()=>{ sel=null; draw(); }; g.oninput=draw;
@@ -1275,7 +1400,7 @@ function openDishEditor(id){
   openSheet(`<div class="row" style="justify-content:space-between"><h2>${d?"Изменить блюдо":"Новое блюдо"}</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
     <div class="row"><label class="f" style="flex:3 1 180px">Название<input id="dName" value="${esc(draft.name)}" placeholder="Например, «Овсянка с бананом»"></label>
     <label class="f" style="flex:1 1 90px">Порций<input id="dPort" type="number" inputmode="numeric" min="1" value="${draft.portions}"></label></div>
-    <div class="note" style="margin:0">Укажи продукты на всё блюдо целиком. Крупы и мясо удобнее вносить в сухом или сыром виде — так точнее и для списка покупок.</div>
+    <div class="note" style="margin:0">Добавляй продукты на всё блюдо целиком: ищи в справочнике или сканируй штрихкод / этикетку, потом впиши граммы. Крупы и мясо удобнее вносить в сухом или сыром виде.</div>
     <div id="dIng"></div>
     <div id="dPk" class="stack" style="gap:10px"></div>
     <div id="dTot"></div>
@@ -1525,6 +1650,7 @@ function bind(){
     if(t.dataset.new) openNewFood(parseInput().q);
     if(t.dataset.online){ $("fSugg").hidden=true; openOnlineSearch(parseInput().q, f=>pick(f)); }
     if(t.id==="fScan") openScanner(f=>pick(f));
+    if(t.id==="fLabel"){ warmOcr(); openFoodConfirm({name:"",kcal:null,code:"",autoLabel:true},f=>pick(f),"Сфотографируй таблицу «Пищевая ценность» — калории и БЖУ подставятся сами. Впиши название и сохрани."); }
     if(t.id==="pScan") openScanner(f=>{ $("pSearch").value=f.name; renderFoods(); });
     if(t.id==="pOnline") openOnlineSearch($("pSearch").value.trim(), f=>{ $("pSearch").value=f.name; renderFoods(); });
     if(t.dataset.wtdel){ const entries=weights().filter(x=>x.date!==t.dataset.wtdel); Store.set("weights",{entries}); }
@@ -1574,6 +1700,8 @@ function bind(){
     saveCustom(f); ["pName","pK","pP","pF","pC"].forEach(i=>$(i).value=""); toast("Продукт сохранён");
   };
   $("pSearch").addEventListener("input",renderFoods);
+  $("pLabelWrap").innerHTML=labelBtnHTML("pLabel","Заполнить с фото этикетки");
+  bindLabelScan("pLabel",{k:"pK",p:"pP",f:"pF",c:"pC"},"pLabelMsg");
   $("prAct").innerHTML=ACTIVITY.map(a=>`<option>${a[0]}</option>`).join("");
   $("prPace").innerHTML=PACE.map(a=>`<option>${a[0]}</option>`).join("");
   $("bkCopy").onclick=()=>{
