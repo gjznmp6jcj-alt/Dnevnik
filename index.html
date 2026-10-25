@@ -349,7 +349,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 21</p>
+    <p class="note">Версия приложения: 2026-10-25 · 22</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2057,8 +2057,11 @@ document.addEventListener("visibilitychange",()=>{
   [700,2500,6000].forEach(t=>setTimeout(()=>{ Sync.lastPull=0; Sync.pull(); },t));
 });
 function healthDiaryBtn(){
-  if(!HEALTH_SC||!serverReady()||curDate!==today()||hcGet()!=="added") return "";
-  return `<button class="ghost small" id="hcRun" style="margin-top:6px;padding:6px 0">↻ Обновить шаги из «Здоровья»</button>`;
+  if(!HEALTH_SC||!serverReady()||curDate!==today()) return "";
+  if(hcGet()!=="added") return `<div class="row" style="margin-top:12px;gap:10px;align-items:center"><button class="grow" id="hcConnect">❤️ Подключить «Здоровье»</button><button class="ghost small" id="hcHave" style="padding:0">Уже добавлена</button></div>`;
+  const h=getDay(today()).health, t=h&&h.at?new Date(h.at):null;
+  const when=t?` · обновлено в ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`:"";
+  return `<button id="hcRun" style="margin-top:12px;width:100%">↻ Обновить из «Здоровья»</button>${when?`<div class="note" style="margin-top:4px;text-align:center">Шаги и активность${when}</div>`:""}`;
 }
 function healthCardHtml(){
   const intro=`<p class="note" style="margin:0">Шаги, активные калории и сегодняшний вес — из «Здоровья», часов и умных весов.</p>`;
