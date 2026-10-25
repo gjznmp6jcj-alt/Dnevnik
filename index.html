@@ -309,7 +309,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 11</p>
+    <p class="note">Версия приложения: 2026-10-25 · 12</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -921,6 +921,8 @@ function renderNorm(){
   </div>${c.limited?`<p class="banner small" style="margin:10px 0 0">Для темпа ${fmt(c.rate,2)} кг в неделю норма опустилась бы ниже ${c.floor} ккал. Поэтому стоит минимум ${c.floor} ккал, и реальный темп — около ${fmt(c.weekly,2)} кг в неделю. Ускорить можно тренировками: сожжённое на них добавляется к норме дня.</p>`:""}<p class="note" style="margin:10px 0 0">Норма пересчитывается по последнему взвешиванию. Безопасным обычно считают темп до 1 кг в неделю.</p>`;
 }
 
+const IN_CLAUDE = !!(window.claude && typeof window.claude.use==="function");
+const CLAUDE_ONLY_MSG = "Эта функция работает в приложении в Telegram. Внутри Claude браузер не разрешает странице скачивать распознаватель и ходить в базу продуктов.";
 /* ---------- РАЗБОР ЭТИКЕТКИ: текст → ккал/Б/Ж/У на 100 г ---------- */
 const LAT2CYR={a:"а",c:"с",e:"е",o:"о",p:"р",x:"х",k:"к",m:"м",t:"т",h:"н",b:"в",y:"у",r:"г"};
 const CYR2LAT={"а":"a","с":"c","е":"e","о":"o","р":"p","х":"x","к":"k","м":"m","т":"t","н":"h","в":"b","у":"y","г":"r","і":"i"};
@@ -980,7 +982,7 @@ function getOcrWorker(lang){
   if(!ocrWorkers[lang]) ocrWorkers[lang]=(async()=>{ const T=await loadTesseract(); return await T.createWorker(lang,1,{logger:m=>{ try{ ocrLogger&&ocrLogger(m); }catch(e){} }}); })().catch(e=>{ delete ocrWorkers[lang]; throw e; });
   return ocrWorkers[lang];
 }
-function warmOcr(){ getOcrWorker().catch(()=>{}); }
+function warmOcr(){ if(!IN_CLAUDE) getOcrWorker().catch(()=>{}); }
 const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
 async function ocrImageFile(file,onProgress){
   ocrLogger=onProgress;
@@ -1004,7 +1006,7 @@ function labelBtnHTML(id,text){
 function bindLabelScan(inputId,fields,msgId){
   const inp=$(inputId); if(!inp) return;
   const langSel=$(inputId+"Lang"); if(langSel) langSel.onchange=()=>{ try{ localStorage.setItem("ocrLang",langSel.value); }catch(e){} };
-  const lbl=inp.closest("label"); if(lbl) lbl.addEventListener("click",()=>warmOcr());
+  const lbl=inp.closest("label"); if(lbl) lbl.addEventListener("click",e=>{ if(IN_CLAUDE){ e.preventDefault(); msg(CLAUDE_ONLY_MSG,true); return; } warmOcr(); });
   const msg=(h,warn)=>{ const m=$(msgId); if(m){ m.innerHTML=h; m.style.color=warn?"var(--warn)":"var(--muted)"; } };
   inp.onchange=async e=>{
     const file=e.target.files&&e.target.files[0]; e.target.value=""; if(!file) return;
@@ -1107,6 +1109,7 @@ function openFoodConfirm(f,onPick,note){
 }
 /* онлайн-поиск */
 function openOnlineSearch(q,onPick){
+  if(IN_CLAUDE){ toast("Поиск в интернете работает в приложении в Telegram"); return; }
   openSheet2(`<div class="row" style="justify-content:space-between"><h2>Поиск в интернете</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
     <div class="row"><input id="osQ" class="grow" style="flex:1 1 160px" value="${esc(q||"")}" placeholder="Например, «творог Простоквашино»" aria-label="Что найти"><button class="primary" id="osGo">Найти</button></div>
     <p class="note" style="margin:0">База Open Food Facts: продукты в упаковке, КБЖУ вносят покупатели. Сверху — продающиеся в России (метка RU). Перед сохранением сверь цифры с упаковкой.</p>
@@ -1184,6 +1187,7 @@ async function decodeImageFile(file){
   } finally { URL.revokeObjectURL(url); }
 }
 function openScanner(onPick){
+  if(IN_CLAUDE){ toast("Сканер работает в приложении в Telegram"); return; }
   openSheet2(`<div class="row" style="justify-content:space-between"><h2>Штрихкод</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
     <div id="scLive" hidden><video id="scVideo" playsinline muted style="width:100%;border-radius:12px;background:#000;aspect-ratio:4/3;object-fit:cover"></video><p class="note" style="margin:6px 0 0">Наведи камеру на штрихкод — он распознается сам.</p></div>
     <label class="primary" id="scPhotoBtn" style="display:block;text-align:center;background:var(--accent);color:var(--accent-ink);border-radius:10px;padding:12px 14px;font-weight:700;cursor:pointer">Сфотографировать штрихкод<input type="file" accept="image/*" capture="environment" id="scFile" hidden></label>
