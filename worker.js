@@ -195,6 +195,10 @@ async function onTelegram(req, env, ctx) {
     await ensureUser(env, uid, m.from.first_name || "");
     await botDescribe(env);
     await send(env, uid, introText(m.from.first_name), { reply_markup: openBtn(env, "Открыть дневник 🌿") });
+  } else if (cmd === "/stats") {
+    const users = await kget(env, "users", []), owner = (await env.KV.get("owner")) || users[0];
+    if (uid !== String(owner)) { await send(env, uid, "Эта команда только для владельца бота."); return text("ok"); }
+    await send(env, uid, await statsText(env, users));
   } else if (cmd === "/help") {
     await send(env, uid, HELP_TEXT, { reply_markup: openBtn(env, "Открыть дневник 🌿") });
   } else if (cmd === "/today") {
@@ -572,6 +576,43 @@ function introText(name) {
 Команды: /today — итог дня, /week — отчёт за неделю, /stop — выключить напоминания.`;
 }
 
+/* ---------------- статистика для владельца ---------------- */
+async function statsText(env, users) {
+  const now = Date.now(), DAY = 864e5;
+  let prof = 0, a1 = 0, a7 = 0, a30 = 0, n7 = 0, n30 = 0, logged7 = 0, fam = new Set(), aiToday = 0;
+  const today = new Date().toISOString().slice(0, 10);
+  for (const uid of users) {
+    const rows = await env.KV.listPrefix(`u:${uid}:d:`);
+    let last = 0, hasProf = false, days7 = new Set();
+    for (const [k, v] of rows) {
+      let d = null; try { d = JSON.parse(v); } catch (e) {}
+      if (!d) continue;
+      const key = k.slice(`u:${uid}:d:`.length);
+      if (key === "profile" && d.v) hasProf = true;
+      if (d.at > last) last = d.at;
+      if (/^d-\d{4}-\d{2}-\d{2}$/.test(key) && d.v && (d.v.meals || []).length && now - Date.parse(key.slice(2)) < 7 * DAY) days7.add(key);
+    }
+    if (hasProf) prof++;
+    if (now - last < DAY) a1++; if (now - last < 7 * DAY) a7++; if (now - last < 30 * DAY) a30++;
+    if (days7.size >= 3) logged7++;
+    const j = +(await env.KV.get(`j:${uid}`) || 0);
+    if (j && now - j < 7 * DAY) n7++; if (j && now - j < 30 * DAY) n30++;
+    const f = await env.KV.get(`uf:${uid}`); if (f) fam.add(f);
+    aiToday += +(await env.KV.get(`ai:${uid}:${today}`) || 0);
+  }
+  return `📊 <b>Статистика бота</b>
+
+👥 Всего пользователей: <b>${users.length}</b>
+🆕 Новых за 7 дней: ${n7} · за 30 дней: ${n30}
+✍️ Заполнили профиль: ${prof}
+🔥 Пользовались: сегодня ${a1} · за 7 дней ${a7} · за 30 дней ${a30}
+📅 Записывали еду 3+ дня за неделю: ${logged7}
+👨‍👩‍👧 Семей: ${fam.size}
+🤖 Запросов к ИИ сегодня: ${aiToday}
+
+<i>«Новые» считаются с ${new Date(+(await env.KV.get("stats:since")) || now).toLocaleDateString("ru-RU")} — раньше дата прихода не записывалась.</i>`;
+}
+
 /* ---------------- пользователи и настройки ---------------- */
 const DEFAULT_SETTINGS = {
   tz: 180,
@@ -582,7 +623,7 @@ const DEFAULT_SETTINGS = {
 };
 async function ensureUser(env, uid, name) {
   const list = await kget(env, "users", []);
-  if (!list.includes(uid)) { list.push(uid); await kput(env, "users", list); }
+  if (!list.includes(uid)) { list.push(uid); await kput(env, "users", list); await env.KV.put(`j:${uid}`, String(Date.now())); }
   if (name) await env.KV.put(`n:${uid}`, name);
 }
 async function userSettings(env, uid) {
@@ -797,6 +838,7 @@ const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", 
 async function runCron(env, now) {
   try { await botDescribe(env); } catch (e) {}
   try { await sendNewsOnce(env); } catch (e) {}
+  try { if (!(await env.KV.get("stats:since"))) await env.KV.put("stats:since", String(Date.now())); } catch (e) {}
   const users = await kget(env, "users", []);
   for (const uid of users) {
     try {
