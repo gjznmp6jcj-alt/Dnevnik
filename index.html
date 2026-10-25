@@ -9,10 +9,20 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="apple-touch-startup-image" href="splash-1320x2868.png" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-1206x2622.png" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-1242x2688.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-828x1792.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="splash-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Дневник">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700&display=swap">
@@ -37,6 +47,20 @@
 html,body{margin:0}
 img{max-width:100%}
 [hidden]{display:none!important}
+#splash{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 80% at 50% 30%,#2F7A55 0%,#163D2B 60%,#0E2A1D 100%);color:#E8F3EC;transition:opacity .55s ease,visibility .55s ease}
+#splash.hide{opacity:0;visibility:hidden}
+.sp-in{display:flex;flex-direction:column;align-items:center}
+.sp-t{font-family:var(--display);font-weight:700;font-size:30px;margin-top:20px;letter-spacing:.01em}
+.sp-s{font-size:14px;opacity:.72;margin-top:6px;letter-spacing:.05em}
+.sp-ring{stroke-dasharray:886 2000;stroke-dashoffset:0}
+@media (prefers-reduced-motion:no-preference){
+  .sp-ring{animation:spring 1.1s cubic-bezier(.5,0,.2,1) both}
+  .sp-leaf{animation:spleaf .9s cubic-bezier(.3,1.4,.5,1) .15s both;transform-box:fill-box;transform-origin:center}
+  .sp-t,.sp-s{animation:spup .6s ease .45s both}
+  @keyframes spring{from{stroke-dashoffset:886}to{stroke-dashoffset:0}}
+  @keyframes spleaf{from{opacity:0;scale:.6}to{opacity:1;scale:1}}
+  @keyframes spup{from{opacity:0;translate:0 8px}to{opacity:1;translate:0 0}}
+}
 html,body{background:var(--bg);color:var(--fg)}
 body{font-family:var(--body);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
 .app{max-width:600px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:calc(12px + env(safe-area-inset-top,0px)) calc(96px + env(safe-area-inset-bottom,0px))}
@@ -173,6 +197,12 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
 @media (prefers-reduced-motion:no-preference){.bar i,.path i{transition:width .4s ease}}
 </style>
 
+<div id="splash" aria-hidden="true"><div class="sp-in">
+  <svg class="sp-logo" viewBox="0 0 512 512" width="132" height="132"><defs><linearGradient id="splf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F3FAF5"/><stop offset="1" stop-color="#CFE8D8"/></linearGradient><linearGradient id="sprg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9BE0B8"/><stop offset="1" stop-color="#F4C76B"/></linearGradient></defs>
+    <circle cx="256" cy="256" r="196" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="22"/>
+    <circle class="sp-ring" cx="256" cy="256" r="196" fill="none" stroke="url(#sprg)" stroke-width="22" stroke-linecap="round" transform="rotate(-90 256 256)"/>
+    <g class="sp-leaf" transform="translate(256 262) rotate(-38)"><path d="M0 -132 C 86 -84 100 34 0 132 C -100 34 -86 -84 0 -132 Z" fill="url(#splf)"/><path d="M0 -104 L0 150" stroke="#2D6A4F" stroke-width="12" stroke-linecap="round"/><path d="M0 -36 L38 -70 M0 18 L46 -20 M0 70 L40 38 M0 -36 L-38 -70 M0 18 L-46 -20 M0 70 L-40 38" stroke="#2D6A4F" stroke-width="9" stroke-linecap="round"/></g></svg>
+  <div class="sp-t">Дневник</div><div class="sp-s">питание · вес · меню</div></div></div>
 </head>
 <body>
 <div class="app">
@@ -188,6 +218,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <div class="d"><span id="dLabel">Сегодня</span><input type="date" id="dPick" aria-label="Выбрать дату"></div>
       <button id="dNext" aria-label="Следующий день">›</button>
     </div>
+    <div id="loginCard" class="banner" hidden></div>
     <div id="localNote" class="banner" hidden></div>
     <div id="noProfile" class="banner" hidden>Сначала заполни <button class="ghost" data-go="profile">профиль</button> — без него приложение не знает твою норму калорий.</div>
     <div class="card" id="summary"></div>
@@ -318,7 +349,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 17</p>
+    <p class="note">Версия приложения: 2026-10-25 · 18</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1811,6 +1842,7 @@ async function shareToFamily(obj,title){
   if(code.length<=500){ url=link; text=`${title}. Нажми на ссылку — откроется дневник, и ты добавишь себе свою порцию.`; }
   else { url=`https://t.me/${BOT_USERNAME}`; text=`${title}.\nЭто много данных для ссылки, поэтому так: скопируй это сообщение целиком, открой дневник и нажми «Вставить, что прислали».\nКОД:${code}`; }
   if(TG&&TG.openTelegramLink){ try{ TG.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent(text)); return; }catch(e){} }
+  if(!TG){ openExternal("https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent(text)); return; }
   const all=text+"\n"+url;
   try{ await navigator.clipboard.writeText(all); toast("Скопировано — отправь в семейный чат"); }
   catch(e){ openSheet2(`<div class="row" style="justify-content:space-between"><h2>Отправить семье</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><p class="note" style="margin:0">Скопируй и отправь в семейный чат:</p><textarea rows="6" style="font:inherit;font-size:13px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(all)}</textarea>`); }
@@ -1940,18 +1972,21 @@ async function loadConfig(){
   try{ const r=await fetch("config.json",{cache:"no-store"}); if(r.ok){ const j=await r.json(); SERVER=String(j.server||"").trim().replace(/\/+$/,""); } }catch(e){}
   try{ const o=localStorage.getItem("serverOverride"); if(o) SERVER=o.trim().replace(/\/+$/,""); }catch(e){}
 }
-const serverReady=()=>!!(SERVER && TG && TG.initData);
+const serverReady=()=>!!(SERVER && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
 async function sapi(path,body,method){
-  const r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:{"content-type":"application/json","x-tg-init":TG.initData},body:body?JSON.stringify(body):undefined,cache:"no-store"});
+  const h={"content-type":"application/json"}; if(TG&&TG.initData) h["x-tg-init"]=TG.initData; else if(sessionToken) h["x-session"]=sessionToken;
+  const r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:h,body:body?JSON.stringify(body):undefined,cache:"no-store"});
   let j=null; try{ j=await r.json(); }catch(e){}
-  if(!r.ok) throw new Error((j&&j.error)||("сервер ответил "+r.status));
+  if(!r.ok){ const er=new Error((j&&j.error==="auth")?"нужно войти заново":((j&&j.error)||("сервер ответил "+r.status))); er.code=r.status; if(r.status===401&&!TG&&sessionToken) setTimeout(onSessionLost,0); throw er; }
   return j;
 }
 async function initServer(){
   await loadConfig();
+  renderLoginCard();
   if(!serverReady()){ renderServerCards(); return; }
   try{ serverInfo=await sapi("hello",{tz:-new Date().getTimezoneOffset()}); }catch(e){ serverInfo={error:errText(e)}; }
   renderServerCards(); if(tab==="diary") renderDiary();
+  if(serverInfo&&!serverInfo.error){ await Sync.pull(); if(serverInfo.family) famLoad(true); }
   syncDay(today()); syncDay(addDays(today(),-1));
 }
 
@@ -2039,7 +2074,8 @@ async function deliverFile(name,mime,content,opts={}){
     msg("Готовлю файл…");
     try{
       const {url}=await sapi("file",{name,mime,b64,inline:!!opts.inline});
-      if(opts.inline || !(TG.isVersionAtLeast&&TG.isVersionAtLeast("8.0")&&TG.downloadFile)) TG.openLink(url);
+      if(!TG) openExternal(url);
+      else if(opts.inline || !(TG.isVersionAtLeast&&TG.isVersionAtLeast("8.0")&&TG.downloadFile)) TG.openLink(url);
       else TG.downloadFile({url,file_name:name});
       msg(opts.hint||"Готово."); return url;
     }catch(e){ msg("Не получилось: "+esc(errText(e))); return null; }
@@ -2090,8 +2126,8 @@ function openProgressCard(){
   openSheet2(`<div class="row" style="justify-content:space-between"><h2>Карточка прогресса</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
     <img src="${png}" alt="Карточка прогресса" style="width:100%;border-radius:14px">
     ${can?`<button class="primary" id="pcSend">Прислать в чат с ботом</button>
-    ${TG.isVersionAtLeast&&TG.isVersionAtLeast("7.8")&&TG.shareToStory?`<button id="pcStory">Выложить в сторис</button>`:""}
-    <button id="pcSave">Сохранить картинку</button>`:`<p class="note" style="margin:0">${TG?"Чтобы отправить или сохранить карточку из Telegram, подключи сервер приложения (см. «Профиль» → «Сервер»). Пока можно сделать скриншот.":"Сохрани картинку долгим нажатием."}</p>`}
+    ${TG&&TG.isVersionAtLeast&&TG.isVersionAtLeast("7.8")&&TG.shareToStory?`<button id="pcStory">Выложить в сторис</button>`:""}
+    <button id="pcSave">Сохранить картинку</button>`:`<p class="note" style="margin:0">${TG?"Чтобы отправить или сохранить карточку из Telegram, подключи сервер приложения. Пока можно сделать скриншот.":"Сохрани картинку долгим нажатием или войди через Telegram, чтобы отправлять её в чат."}</p>`}
     <div class="note" id="pcMsg"></div>`);
   if(!can) return;
   $("pcSend").onclick=async()=>{ $("pcMsg").textContent="Отправляю…"; try{ const r=await sapi("send-photo",{b64,caption:"Мой прогресс 💪"}); $("pcMsg").textContent=r.ok?"Готово! Карточка в чате с ботом — оттуда её можно переслать кому угодно.":("Не получилось: "+(r.error||"")+". Нажми в боте /start и попробуй снова."); }catch(e){ $("pcMsg").textContent="Не получилось: "+errText(e); } };
@@ -2196,7 +2232,7 @@ function famShareMyMenu(){
 function famInvite(){
   const f=famState.family, link=`https://t.me/${BOT_USERNAME}?startapp=f_${f.code}`;
   const txt=`Присоединяйся к нашей семье «${f.title}» в дневнике питания: нажми на ссылку. Код: ${f.code}`;
-  if(TG&&TG.openTelegramLink) TG.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt));
+  openExternal("https://t.me/share/url?url="+encodeURIComponent(link)+"&text="+encodeURIComponent(txt));
 }
 function famJoinPrompt(code){
   if(!serverReady()){ toast("Для семьи нужен сервер приложения"); return; }
@@ -2224,17 +2260,18 @@ shareToFamily=async function(obj,title){
 function renderServerCards(){
   const el=$("integrCards"); if(!el) return;
   const s=serverInfo&&serverInfo.settings;
-  const hs=TG&&TG.isVersionAtLeast&&TG.isVersionAtLeast("8.0")&&TG.addToHomeScreen;
   el.innerHTML=`
-    ${hs?`<div class="card stack"><h2>Иконка на экране</h2><p class="note" style="margin:0">Дневник будет открываться с главного экрана телефона, как обычное приложение.</p><button id="homeBtn">Добавить иконку на экран</button></div>`:""}
+    ${TG?`<div class="card stack"><h2>Отдельное приложение на экране</h2><p class="note" style="margin:0">Чтобы дневник открывался с главного экрана сам, без Telegram: открой его в Safari, нажми «Поделиться» → «На экран „Домой“», а потом войди через Telegram — записи будут те же.</p><button class="primary" id="openSafari">Открыть в Safari</button></div>`:""}
     <div class="card stack"><h2>«Здоровье» на iPhone</h2><p class="note" style="margin:0">Шаги, активные калории и вес — из «Здоровья», часов и умных весов, автоматически каждый вечер.</p>${HEALTH_GUIDE}</div>
     <div class="card stack"><h2>Выгрузка</h2><p class="note" style="margin:0">Дневник, итоги по дням, вес и тренировки одним файлом — откроется в Excel или «Таблицах».</p><button id="csvBtn">Выгрузить в Excel</button><div class="note" id="csvMsg"></div></div>
     <div class="card stack"><h2>Сервер и бот</h2>
-      ${!TG?`<p class="note" style="margin:0">Открой приложение в Telegram.</p>`
+      ${!TG&&!SERVER?`<p class="note" style="margin:0">Сервер не подключён.</p>`
+      :!TG&&!sessionToken?`<p class="note" style="margin:0">Войди через Telegram — тогда здесь заработают фото еды, семья, напоминания и общие с ботом записи.</p><button class="primary" id="loginGo">Войти через Telegram</button>`
       :!SERVER?`<p class="note" style="margin:0">Сервер не подключён. С ним бот присылает напоминания и итоги, работает фото еды, семья и поиск без VPN. Инструкция — у Claude в чате.</p>`
       :serverInfo&&serverInfo.error?`<p class="note" style="margin:0;color:var(--warn)">Сервер не отвечает: ${esc(serverInfo.error)}</p><button id="srvRetry">Проверить снова</button>`
       :!serverInfo?`<p class="note" style="margin:0">Подключаюсь…</p>`
       :`<p class="small" style="margin:0">✅ Подключён${serverInfo.ai?" · фото еды доступно":" · фото еды выключено (нет ключа ИИ)"}</p>
+        ${!TG&&sessionUser?`<div class="row small" style="justify-content:space-between">Вход: ${esc(sessionUser.name)}<button class="ghost" id="logoutBtn" style="padding:0">Выйти</button></div>`:""}
         <h3 class="small muted" style="margin:6px 0 0;letter-spacing:.06em">НАПОМИНАНИЯ БОТА</h3>
         <label class="row small" style="gap:8px"><input type="checkbox" id="rmLog" ${s.log.on?"checked":""} style="width:auto"><span class="grow">Записать еду, если пусто</span><input type="time" id="rmLog1" value="${s.log.times[0]||"13:30"}" style="max-width:110px"><input type="time" id="rmLog2" value="${s.log.times[1]||"20:30"}" style="max-width:110px"></label>
         <label class="row small" style="gap:8px"><input type="checkbox" id="rmSum" ${s.summary.on?"checked":""} style="width:auto"><span class="grow">Итог дня</span><input type="time" id="rmSumT" value="${s.summary.time}" style="max-width:110px"></label>
@@ -2252,7 +2289,10 @@ function bindIntegrations(){
   document.addEventListener("click",e=>{
     const b=e.target.closest("button"); if(!b) return; const d=b.dataset;
     switch(b.id){
-      case "homeBtn": try{ TG.addToHomeScreen(); }catch(err){ toast("Не получилось — обнови Telegram"); } break;
+      case "openSafari": openExternal(APP_URL+"?install=1"); break;
+      case "loginGo": startLogin(); break;
+      case "loginCancel": clearInterval(loginTimer); loginNonce=null; renderLoginCard(); break;
+      case "logoutBtn": logout(); break;
       case "csvBtn": deliverFile(`Дневник ${today()}.csv`,"text/csv;charset=utf-8",buildCSV(),{msgEl:"csvMsg",hint:"Файл готов — открой его в «Файлах» или Excel."}); break;
       case "srvRetry": serverInfo=null; renderServerCards(); initServer(); break;
       case "rmSave": saveReminders(); break;
@@ -2275,6 +2315,108 @@ function bindIntegrations(){
   });
   if(TG&&TG.onEvent){ try{ TG.onEvent("homeScreenAdded",()=>toast("Иконка добавлена на экран")); }catch(e){} }
 }
+/* ================= АККАУНТ: вход вне Telegram и общие данные ================= */
+const SESSION_KEY="dnevnik-session", AT_KEY="dnevnik-at";
+let sessionToken=null, sessionUser=null, docAt={};
+try{ sessionToken=localStorage.getItem(SESSION_KEY)||null; sessionUser=JSON.parse(localStorage.getItem(SESSION_KEY+"-user")||"null"); }catch(e){}
+try{ docAt=JSON.parse(localStorage.getItem(AT_KEY)||"{}")||{}; }catch(e){ docAt={}; }
+const saveAt=()=>{ try{ localStorage.setItem(AT_KEY,JSON.stringify(docAt)); }catch(e){} };
+const IS_STANDALONE = matchMedia("(display-mode: standalone)").matches || navigator.standalone===true;
+const APP_URL = location.origin + location.pathname.replace(/index\.html$/,"");
+function openExternal(url){
+  if(TG){ try{ if(/^https:\/\/t\.me\//.test(url)) TG.openTelegramLink(url); else TG.openLink(url); return; }catch(e){} }
+  const w=window.open(url,"_blank"); if(!w) location.href=url;
+}
+
+const Sync={
+  pending:{}, timer:null, ready:false, pulling:false, lastPull:0,
+  mark(k){ docAt[k]=Date.now(); saveAt(); this.pending[k]=1; this.schedule(); },
+  schedule(){ clearTimeout(this.timer); this.timer=setTimeout(()=>this.push(),900); },
+  async push(){
+    if(!this.ready||!serverReady()) return;
+    const keys=Object.keys(this.pending); if(!keys.length) return; this.pending={};
+    const docs={}; keys.forEach(k=>{ docs[k]={v:Store.docs[k]===undefined?null:Store.docs[k], at:docAt[k]||Date.now()}; });
+    try{ const r=await sapi("data",{docs}); if(r&&r.newer) this.apply(r.newer); this.status(true); }
+    catch(e){ keys.forEach(k=>this.pending[k]=1); this.status(false); setTimeout(()=>this.schedule(),8000); }
+  },
+  apply(map){
+    let changed=false, hadProfile=!!profile();
+    for(const [k,d] of Object.entries(map||{})){
+      if(!d||typeof d.at!=="number") continue;
+      if((docAt[k]||0)>=d.at) continue;
+      docAt[k]=d.at; changed=true;
+      if(d.v==null) delete Store.docs[k]; else Store.docs[k]=d.v;
+      if(Store.mode==="tg"&&Store._push){ try{ Store.dirty.add(k); Store._push(k); }catch(e){} }
+    }
+    if(changed){ saveAt(); try{ Store._saveLocal&&Store._saveLocal(); }catch(e){} fillProfileForm(); if(!hadProfile&&profile()) go("diary"); else renderAll(); }
+    return changed;
+  },
+  async pull(){
+    if(!serverReady()||this.pulling) return; this.pulling=true;
+    try{
+      const r=await sapi("data"), remote=(r&&r.docs)||{};
+      this.apply(remote);
+      for(const k of Object.keys(Store.docs)){ const ra=remote[k]?remote[k].at:-1, la=docAt[k]||(remote[k]?0:1); if(la>ra){ if(!docAt[k]) docAt[k]=Date.now(); this.pending[k]=1; } }
+      saveAt(); this.ready=true; this.lastPull=Date.now(); this.status(true); await this.push();
+    }catch(e){ this.status(false); if(e&&e.code===401) onSessionLost(); }
+    finally{ this.pulling=false; }
+  },
+  status(ok){ if(TG) return; if(!sessionToken) return; setSync(ok?"Сохранено в аккаунте":"Нет связи — сохранено на телефоне", ok); const b=$("localNote"); if(b&&ok) b.hidden=true; }
+};
+(function hookSync(){
+  const _set=Store.set.bind(Store);
+  Store.set=function(k,v,q){ _set(k,v,q); try{ if(SERVER) Sync.mark(k); }catch(e){} };
+})();
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden && serverReady() && Date.now()-Sync.lastPull>15000) Sync.pull(); if(!document.hidden && loginNonce) checkLogin(); });
+setInterval(()=>{ if(!document.hidden && serverReady() && Date.now()-Sync.lastPull>60000) Sync.pull(); },30000);
+
+function onSessionLost(){
+  sessionToken=null; sessionUser=null; try{ localStorage.removeItem(SESSION_KEY); localStorage.removeItem(SESSION_KEY+"-user"); }catch(e){}
+  serverInfo=null; renderServerCards(); renderLoginCard(); toast("Вход устарел — войди через Telegram ещё раз");
+}
+
+/* --- вход через бота --- */
+let loginNonce=null, loginTimer=null;
+async function startLogin(){
+  if(!SERVER){ toast("Сервер приложения не подключён"); return; }
+  try{
+    const r=await fetch(SERVER+"/api/login/start",{cache:"no-store"}).then(r=>r.json());
+    loginNonce=r.nonce; renderLoginCard();
+    openExternal(r.link);
+    clearInterval(loginTimer); loginTimer=setInterval(checkLogin,2000);
+    setTimeout(()=>{ if(loginNonce){ clearInterval(loginTimer); } },15*60000);
+  }catch(e){ toast("Не получилось связаться с сервером: "+errText(e)); }
+}
+async function checkLogin(){
+  if(!loginNonce) return;
+  try{
+    const r=await fetch(SERVER+"/api/login/check?nonce="+encodeURIComponent(loginNonce),{cache:"no-store"}).then(r=>r.json());
+    if(r.status==="ok"){
+      clearInterval(loginTimer); loginNonce=null; sessionToken=r.token; sessionUser=r.user;
+      try{ localStorage.setItem(SESSION_KEY,sessionToken); localStorage.setItem(SESSION_KEY+"-user",JSON.stringify(sessionUser)); }catch(e){}
+      renderLoginCard(); toast(`Привет, ${sessionUser.name}! Подтягиваю твои записи…`);
+      await initServer();
+    } else if(r.status==="expired"){ clearInterval(loginTimer); loginNonce=null; renderLoginCard(); }
+  }catch(e){}
+}
+async function logout(){
+  try{ await sapi("logout",{}); }catch(e){}
+  sessionToken=null; sessionUser=null; try{ localStorage.removeItem(SESSION_KEY); localStorage.removeItem(SESSION_KEY+"-user"); }catch(e){}
+  serverInfo=null; Sync.ready=false; renderServerCards(); renderLoginCard(); setSyncMode(); toast("Ты вышла из аккаунта. Записи остались на телефоне.");
+}
+function renderLoginCard(){
+  const el=$("loginCard"); if(!el) return;
+  const need = !TG && SERVER && !sessionToken;
+  el.hidden=!need; if(!need) return;
+  el.innerHTML = loginNonce
+    ? `<div class="stack" style="gap:8px"><b>Жду подтверждения в Telegram…</b><span class="small">В открывшемся чате с ботом нажми <b>«Старт»</b>, потом вернись сюда — вход выполнится сам.</span><div class="row"><button class="primary grow" id="loginGo">Открыть Telegram ещё раз</button><button class="grow" id="loginCancel">Отмена</button></div></div>`
+    : `<div class="stack" style="gap:8px"><b>Войди, чтобы данные были общими с ботом</b><span class="small">Записи, меню, семья и фото еды — одни и те же здесь и в Telegram. Один раз, через бота.</span><button class="primary" id="loginGo">Войти через Telegram</button></div>`;
+}
+
+/* --- заставка --- */
+const splashT0=Date.now();
+function hideSplash(){ const s=$("splash"); if(!s||s.classList.contains("hide")) return; const wait=Math.max(0,900-(Date.now()-splashT0)); setTimeout(()=>{ s.classList.add("hide"); setTimeout(()=>s.remove(),700); },wait); }
+setTimeout(hideSplash,4000); // на всякий случай
 
 function bindMenu(){
   $("wPrev").onclick=()=>{ menuWeek=addDays(menuWeek,-7); menuDay=addDays(menuDay,-7); copyMode=false; clearAsk=false; renderMenu(); };
@@ -2426,8 +2568,10 @@ function onReady(){
   setSyncMode();
   fillProfileForm();
   go(profile()?"diary":"profile");
+  if(/[?&]install=1/.test(location.search) && !TG && !IS_STANDALONE) go("profile");
+  hideSplash();
   checkStartParam();
-  initServer().then(()=>{ if(serverInfo&&serverInfo.family) famLoad(true); });
+  initServer();
 }
 
 bind(); bindMenu(); bindIntegrations(); updateMealSeg(); go("diary");

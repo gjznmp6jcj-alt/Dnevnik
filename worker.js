@@ -19,14 +19,29 @@ export class DnevnikStore extends DurableObject {
   }
   async kput(k, v, ttl) { await this.ctx.storage.put(k, { v, exp: ttl ? Date.now() + ttl * 1000 : 0 }); }
   async kdel(k) { await this.ctx.storage.delete(k); }
+  async klist(prefix) {
+    const m = await this.ctx.storage.list({ prefix }), out = [], now = Date.now();
+    for (const [k, r] of m) { if (r && (!r.exp || r.exp >= now)) out.push([k, r.v]); }
+    return out;
+  }
+  async kputMany(entries) { const o = {}; for (const [k, v] of entries) o[k] = { v, exp: 0 }; await this.ctx.storage.put(o); }
 }
 function storeKV(env) {
-  if (env.KV) return env.KV;                       // если подключено обычное KV — используем его
+  if (env.KV) {
+    const kv = env.KV;
+    return {
+      get: (k, t) => kv.get(k, t), put: (k, v, o) => kv.put(k, v, o), delete: k => kv.delete(k),
+      async listPrefix(prefix) { const out = []; let cursor; do { const r = await kv.list({ prefix, cursor }); for (const x of r.keys) out.push([x.name, await kv.get(x.name)]); cursor = r.list_complete ? null : r.cursor; } while (cursor); return out; },
+      async putMany(entries) { for (const [k, v] of entries) await kv.put(k, String(v)); },
+    };
+  }                       // если подключено обычное KV — используем его
   const stub = () => env.STORE.get(env.STORE.idFromName("main"));
   return {
     async get(k, type) { const v = await stub().kget(k); if (v == null) return null; return type === "json" ? JSON.parse(v) : v; },
     async put(k, v, opts) { await stub().kput(k, String(v), opts && opts.expirationTtl); },
     async delete(k) { await stub().kdel(k); },
+    async listPrefix(prefix) { return await stub().klist(prefix); },
+    async putMany(entries) { await stub().kputMany(entries.map(([k, v]) => [k, String(v)])); },
   };
 }
 
@@ -46,6 +61,8 @@ export default {
       if (url.pathname === "/setup") return await setup(req, env, url);
       if (url.pathname === "/tg" && req.method === "POST") return await onTelegram(req, env, ctx);
       if (url.pathname.startsWith("/f/")) return await serveFile(env, url);
+      if (url.pathname === "/api/login/start") return cors(await loginStart(env), req);
+      if (url.pathname === "/api/login/check") return cors(await loginCheck(env, url), req);
       if (url.pathname.startsWith("/api/")) {
         const user = await auth(req, env);
         if (!user) return cors(json({ error: "auth" }, 401), req);
@@ -87,6 +104,8 @@ const kput = (env, k, v, ttl) => env.KV.put(k, JSON.stringify(v), ttl ? { expira
 
 /* проверка подписи Telegram (initData) */
 async function auth(req, env) {
+  const sess = req.headers.get("x-session") || "";
+  if (sess) { const u = await kget(env, `sess:${sess}`); return u ? { id: String(u.id), name: u.name, session: sess } : null; }
   const init = req.headers.get("x-tg-init") || "";
   if (!init) return null;
   const p = new URLSearchParams(init);
@@ -100,6 +119,23 @@ async function auth(req, env) {
   let u = {}; try { u = JSON.parse(p.get("user") || "{}"); } catch (e) {}
   if (!u.id) return null;
   return { id: String(u.id), name: [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username || "Без имени" };
+}
+
+/* ---------------- вход в отдельном приложении через бота ---------------- */
+async function loginStart(env) {
+  const nonce = rid(24), bot = await botUsername(env);
+  await kput(env, `ln:${nonce}`, { st: "wait" }, 60 * 15);
+  return json({ nonce, link: `https://t.me/${bot}?start=login_${nonce}` });
+}
+async function loginCheck(env, url) {
+  const nonce = String(url.searchParams.get("nonce") || "").replace(/[^a-z0-9]/g, "");
+  const r = nonce ? await kget(env, `ln:${nonce}`) : null;
+  if (!r) return json({ status: "expired" });
+  if (!r.uid) return json({ status: "wait" });
+  const token = rid(32);
+  await kput(env, `sess:${token}`, { id: r.uid, name: r.name }, 60 * 60 * 24 * 365);
+  await env.KV.delete(`ln:${nonce}`);
+  return json({ status: "ok", token, user: { id: r.uid, name: r.name } });
 }
 
 /* ---------------- Telegram Bot API ---------------- */
@@ -141,6 +177,15 @@ async function onTelegram(req, env, ctx) {
   const uid = String(m.from.id), cmd = m.text.trim().split(/\s+/)[0].toLowerCase();
   if (cmd === "/start") {
     const arg = m.text.trim().split(/\s+/)[1] || "";
+    if (arg.startsWith("login_")) {
+      const nonce = arg.slice(6).replace(/[^a-z0-9]/g, ""), r = await kget(env, `ln:${nonce}`);
+      const name = [m.from.first_name, m.from.last_name].filter(Boolean).join(" ") || m.from.username || "Без имени";
+      if (!r) { await send(env, uid, "Ссылка для входа устарела. Нажми «Войти через Telegram» в приложении ещё раз."); return text("ok"); }
+      await ensureUser(env, uid, m.from.first_name || "");
+      await kput(env, `ln:${nonce}`, { st: "ok", uid, name }, 60 * 15);
+      await send(env, uid, "✅ Вход выполнен! Возвращайся в приложение «Дневник» — твои записи уже подтягиваются.");
+      return text("ok");
+    }
     await ensureUser(env, uid, m.from.first_name || "");
     await send(env, uid, "Привет! Я дневник похудения 🌿\nЗаписывай еду, вес и тренировки в приложении — а я буду напоминать и присылать итоги дня и недели. Настроить напоминания можно в приложении: «Профиль» → «Напоминания бота».", { reply_markup: openBtn(env) });
   } else if (cmd === "/today") {
@@ -200,6 +245,25 @@ async function api(req, env, url, user, ctx) {
     await kput(env, `d:${user.id}:${body.date}`, { kcal: body.kcal || 0, norm: body.norm || 0, p: body.p || 0, f: body.f || 0, c: body.c || 0, burn: body.burn || 0, n: body.n || 0, steps: body.steps || 0, w: body.w || null }, 60 * 60 * 24 * 45);
     return json({ ok: true });
   }
+  if (p === "data" && req.method === "GET") {
+    const pre = `u:${user.id}:d:`, rows = await env.KV.listPrefix(pre), docs = {};
+    for (const [k, v] of rows) { try { docs[k.slice(pre.length)] = JSON.parse(v); } catch (e) {} }
+    return json({ docs, me: { id: user.id, name: user.name } });
+  }
+  if (p === "data") {   // {docs:{key:{v,at}}} — побеждает более свежая запись
+    const pre = `u:${user.id}:d:`, incoming = body.docs || {}, keys = Object.keys(incoming).filter(k => /^[A-Za-z0-9_\-]{1,64}$/.test(k)).slice(0, 400);
+    const cur = {}; for (const [k, v] of await env.KV.listPrefix(pre)) { try { cur[k.slice(pre.length)] = JSON.parse(v); } catch (e) {} }
+    const write = [], accepted = {}, newer = {};
+    for (const k of keys) {
+      const d = incoming[k]; if (!d || typeof d.at !== "number") continue;
+      const size = JSON.stringify(d).length; if (size > 1_500_000) continue;
+      if (!cur[k] || d.at > (cur[k].at || 0)) { write.push([pre + k, JSON.stringify({ v: d.v === undefined ? null : d.v, at: d.at })]); accepted[k] = d.at; }
+      else if (cur[k].at > d.at) newer[k] = cur[k];
+    }
+    if (write.length) await env.KV.putMany(write);
+    return json({ ok: true, accepted, newer });
+  }
+  if (p === "logout") { if (user.session) await env.KV.delete(`sess:${user.session}`); return json({ ok: true }); }
   if (p === "ai/photo") return await aiPhoto(env, user, body);
   if (p === "off/search") return await offProxy(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(url.searchParams.get("q") || "")}&page_size=40&langs=ru,en&fields=${OFF_FIELDS}`, ctx);
   if (p.startsWith("off/product/")) return await offProxy(`${OFF}/api/v2/product/${encodeURIComponent(p.slice(12))}.json?fields=${OFF_FIELDS}`, ctx);
