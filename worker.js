@@ -219,23 +219,43 @@ const autoMeal = h => h < 11 ? "Завтрак" : h < 15 ? "Обед" : h < 18 ?
 const r1 = n => Math.round((+n || 0) * 10) / 10;
 const uid8 = () => rid(8) + Date.now().toString(36).slice(-4);
 
-async function claudeJSON(env, uid, content, maxTokens = 1500) {
+function pickJSON(t) {
+  t = String(t || "").replace(/```(?:json)?/gi, "");
+  const a = t.indexOf("{"); if (a < 0) return null;
+  let depth = 0, inStr = false, esc2 = false;
+  for (let i = a; i < t.length; i++) {
+    const ch = t[i];
+    if (inStr) { if (esc2) esc2 = false; else if (ch === "\\") esc2 = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true; else if (ch === "{") depth++; else if (ch === "}") { depth--; if (depth === 0) { try { return JSON.parse(t.slice(a, i + 1)); } catch (e) { return null; } } }
+  }
+  return null;
+}
+async function claudeJSON(env, uid, content, maxTokens = 4000) {
   if (!env.ANTHROPIC_API_KEY) throw new Error("на сервере нет ключа ИИ");
   const day = new Date().toISOString().slice(0, 10), ck = `ai:${uid}:${day}`;
   const used = +(await env.KV.get(ck) || 0);
   if (used >= AI_DAILY_LIMIT) throw new Error(`на сегодня лимит ${AI_DAILY_LIMIT} запросов к ИИ исчерпан`);
-  const call = model => fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content }] }),
-  });
+  const call = async (model, extra) => {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: extra ? content.concat([{ type: "text", text: extra }]) : content }] }),
+    });
+    const raw = await r.text(); let data = {}; try { data = JSON.parse(raw); } catch (e) {}
+    return { ok: r.ok, status: r.status, data };
+  };
   let r = await call(env.AI_MODEL || MODEL_MAIN);
   if (!r.ok && (r.status === 400 || r.status === 404)) r = await call(MODEL_FALLBACK);
-  const data = await r.json();
-  if (!r.ok) throw new Error((data.error && data.error.message) || ("ИИ ответил ошибкой " + r.status));
+  if (!r.ok) throw new Error((r.data.error && r.data.error.message) || ("ИИ ответил ошибкой " + r.status));
   await env.KV.put(ck, String(used + 1), { expirationTtl: 60 * 60 * 30 });
-  const t = (data.content || []).map(c => c.text || "").join(""), m = t.match(/\{[\s\S]*\}/);
-  return JSON.parse(m ? m[0] : t);
+  const textOf = d => (d.content || []).map(c => c.text || "").join("");
+  let j = pickJSON(textOf(r.data));
+  if (!j) {   // ответ оборвался или пришёл не в том виде — одна повторная попытка, коротко
+    const r2 = await call(MODEL_FALLBACK, "Ответь ТОЛЬКО компактным JSON по схеме выше, без пояснений и без markdown.");
+    if (r2.ok) j = pickJSON(textOf(r2.data));
+  }
+  if (!j) throw new Error("ИИ ответил непонятно — попробуй переформулировать или прислать ещё раз");
+  return j;
 }
 
 /* блюда пользователя — чтобы ИИ узнавал «моя овсянка» */
@@ -303,13 +323,15 @@ const FOOD_TEXT_PROMPT = (dishes) => `Ты — нутрициолог в дне�
 — Названия по-русски, коротко: «Гречка варёная», «Котлета куриная жареная».
 — meal: если в сообщении сказано «на завтрак/обед/ужин/перекус» — укажи "Завтрак", "Обед", "Перекус" или "Ужин", иначе null.
 — day_offset: 0 — сегодня; -1 если «вчера»; -2 если «позавчера».
+— Если сообщение — это рецепт или список продуктов для готовки (а не то, что человек съел), верни "type":"recipe" и пустой items.
 — Если сообщение не про еду — верни пустой items и в note коротко скажи, что ты понимаешь.
 ${dishes.length ? `Свои блюда пользователя (если он упоминает их — используй эти значения и порцию):\n${dishes.map(d => { const s = dishStats(d); return `«${d.name}»: порция ${s.portionG} г, на 100 г ${s.per100.kcal} ккал, Б ${s.per100.p}, Ж ${s.per100.f}, У ${s.per100.c}`; }).join("\n")}\n` : ""}Ответь ТОЛЬКО JSON без пояснений:
-{"meal":null,"day_offset":0,"items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число}],"note":""}`;
+{"type":"food","meal":null,"day_offset":0,"items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число}],"note":""}`;
 
 async function botFoodText(env, uid, s, textIn, viaVoice) {
   const dishes = (await userDishes(env, uid)).slice(0, 40);
   const j = await claudeJSON(env, uid, [{ type: "text", text: FOOD_TEXT_PROMPT(dishes) + `\n\nСообщение пользователя: «${String(textIn).slice(0, 1500)}»` }]);
+  if (j.type === "recipe") return botRecipe(env, uid, String(textIn), null);
   const items = (j.items || []).filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 80), g: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0 }));
   if (!items.length) {
     await send(env, uid, `${viaVoice ? `🎙 Услышала: «${esc(textIn)}»\n\n` : ""}${esc(j.note || "Не поняла, что записать.")}\n\nНапиши, что ты съела, например: «на обед 150 г гречки и котлета» — и я запишу в дневник. Можно голосовым или фото тарелки. А ссылку на рецепт я сохраню как блюдо.`, { reply_markup: openBtn(env) });
@@ -374,6 +396,7 @@ const RECIPE_PROMPT = `Ты — нутрициолог. По рецепту со
 — name: короткое название блюда по-русски.
 — portions: число порций из рецепта (если не указано — оцени).
 — ing: ингредиенты на ВСЁ блюдо. Вес каждого — в граммах (переведи штуки, ложки, стаканы, «щепотку»; специи и соль можно не включать, если их меньше 5 г). Пищевая ценность — на 100 г ингредиента в том виде, как он кладётся в блюдо (обычно сырой). Названия по-русски, коротко.
+— Воду, бульон и молоко для варки включай как ингредиенты (вода — 0 ккал): от них зависит вес порции. Для супов и каш учти, что примерно 15–20% воды выкипает — уменьши вес воды на эту долю.
 — Если текст — не рецепт, верни пустой ing и в note скажи, что не так.
 Ответь ТОЛЬКО JSON без пояснений:
 {"name":"...","portions":число,"ing":[{"name":"...","g":число,"kcal":число,"p":число,"f":число,"c":число}],"note":""}`;
@@ -404,8 +427,16 @@ async function botRecipeUrl(env, uid, link) {
     clearTimeout(tm);
     if (r.ok) html = (await r.text()).slice(0, 2_000_000);
   } catch (e) {}
+  let ld = html ? recipeFromLd(html) : null;
+  if (!ld && (!html || htmlText(html).length < 400)) {   // сайт не пустил или отдал пустую страницу — читаем через «читалку»
+    try {
+      const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 20000);
+      const r = await fetch("https://r.jina.ai/" + link, { signal: ctl.signal, headers: { "accept": "text/plain", "x-return-format": "text" } });
+      clearTimeout(tm);
+      if (r.ok) { const tx = (await r.text()).slice(0, 60000); if (tx.length > 300) html = `<body>${tx.replace(/</g, " ")}</body>`; }
+    } catch (e) {}
+  }
   if (!html) { await send(env, uid, "Не получилось открыть эту страницу — сайт не пускает. Скопируй текст рецепта (ингредиенты с количеством) и пришли сообщением — я сохраню блюдо."); return; }
-  const ld = recipeFromLd(html);
   let src;
   if (ld) {
     const ingr = [].concat(ld.recipeIngredient || ld.ingredients || []).join("\n");
@@ -440,6 +471,12 @@ async function onCallback(env, cq) {
   await ack();
 }
 
+function looksLikeRecipe(t) {
+  if (/ингредиент|рецепт|приготовлени|способ приготов|на \d+ порци|\(на \d+|порци[йи]\)/i.test(t) && t.length > 80) return true;
+  const lines = t.split(/\n/).filter(x => x.trim());
+  const qty = lines.filter(x => /\d+\s*(г|гр|кг|мл|л|шт|ст\.?|ч\.?\s*л|ложк|зубч|стакан)|по вкусу/i.test(x)).length;
+  return lines.length >= 5 && qty >= 4 && /по вкусу|вода|порци/i.test(t);
+}
 async function botMessage(env, m) {
   const uid = String(m.from.id), s = await userSettings(env, uid);
   await ensureUser(env, uid, m.from.first_name || "");
@@ -450,7 +487,7 @@ async function botMessage(env, m) {
     const t = (m.text || "").trim();
     const link = t.match(/https?:\/\/[^\s]+/);
     if (link) return await botRecipeUrl(env, uid, link[0]);
-    if (t.length > 160 && /ингредиент|рецепт|приготовлени/i.test(t)) return await botRecipe(env, uid, t, null);
+    if (looksLikeRecipe(t)) return await botRecipe(env, uid, t, null);
     return await botFoodText(env, uid, s, t, false);
   } catch (e) {
     await send(env, uid, `Не получилось: ${esc(String(e && e.message || e))}. Попробуй ещё раз чуть позже или запиши в приложении.`, { reply_markup: openBtn(env) });
