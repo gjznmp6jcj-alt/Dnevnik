@@ -225,6 +225,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
     <div id="localNote" class="banner" hidden></div>
     <div id="noProfile" class="banner" hidden>Сначала заполни <button class="ghost" data-go="profile">профиль</button> — без него приложение не знает твою норму калорий.</div>
     <div class="card" id="summary"></div>
+    <div class="card" id="coachNotes" hidden style="border-color:var(--accent)"></div>
 
     <div class="card stack">
       <h2>Добавить продукт</h2>
@@ -347,6 +348,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <div class="row" id="bkConfirm" hidden><span class="small grow">Текущие записи на этом устройстве заменятся данными из копии.</span><button class="grow" id="bkNo">Отмена</button><button class="primary grow" id="bkYes">Заменить</button></div>
     </div>
     <div id="integrCards" class="stack"></div>
+    <div id="coachCards" class="stack"></div>
     <div class="card stack" id="tipsCard">
       <h2>Подсказки</h2>
       <label class="row small" style="gap:8px"><input type="checkbox" id="tipsOn" style="width:auto" checked><span class="grow">Показывать подсказки в разделах</span></label>
@@ -358,7 +360,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-25 · 26</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 27</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1982,6 +1984,7 @@ function checkStartParam(){
   if(!sp) return;
   const whenReady=fn=>{ const t0=Date.now(); const w=()=>{ if(Store.synced||Store.mode!=="tg"||Date.now()-t0>6000) fn(); else setTimeout(w,200); }; setTimeout(w,300); };
   if(/^h_/.test(sp)){ whenReady(()=>applyHealth(sp)); return; }
+  if(/^t_[a-z0-9]{4,12}$/.test(sp)){ whenReady(()=>{ const go2=()=>serverInfo&&!serverInfo.error?coachJoinPrompt(sp.slice(2)):setTimeout(go2,300); go2(); }); return; }
   if(/^f_[A-Za-z0-9]{4,10}$/.test(sp)){ whenReady(()=>{ const go2=()=>serverInfo?famJoinPrompt(sp.slice(2)):setTimeout(go2,300); go2(); }); return; }
   if(!/^[zj][A-Za-z0-9_-]{10,}$/.test(sp)) return;
   const t0=Date.now();
@@ -2014,7 +2017,7 @@ async function initServer(){
   try{ serverInfo=await sapi("hello",{tz:-new Date().getTimezoneOffset()}); }catch(e){ serverInfo={error:errText(e)}; }
   renderServerCards(); if(tab==="diary") renderDiary();
   { const bh=$("botHint"); if(bh) bh.hidden=!(serverInfo&&!serverInfo.error); }
-  if(serverInfo&&!serverInfo.error){ await Sync.pull(); if(serverInfo.family) famLoad(true); }
+  if(serverInfo&&!serverInfo.error){ await Sync.pull(); if(serverInfo.family) famLoad(true); trLoad(); }
   syncDay(today()); syncDay(addDays(today(),-1));
 }
 
@@ -2449,6 +2452,7 @@ const Sync={
       const r=await sapi("data"), remote=(r&&r.docs)||{};
       this.apply(remote);
       if(r&&r.health) try{ applyHealthData(r.health); }catch(e){}
+      if(r&&r.coach){ coachState=r.coach; try{ renderCoachNotes(); renderCoachCards(); }catch(e){} }
       for(const k of Object.keys(Store.docs)){ const ra=remote[k]?remote[k].at:-1, la=docAt[k]||(remote[k]?0:1); if(la>ra){ if(!docAt[k]) docAt[k]=Date.now(); this.pending[k]=1; } }
       saveAt(); this.ready=true; this.lastPull=Date.now(); this.status(true); await this.push();
     }catch(e){ this.status(false); if(e&&e.code===401) onSessionLost(); }
@@ -2548,6 +2552,7 @@ const TIPS={
     ["#prPace","Темп похудения","Чем быстрее темп, тем меньше норма. Ниже безопасного минимума она не опустится."],
     ["#normCard","Твоя норма","Норма калорий, белков, жиров и углеводов и прогноз, когда дойдёшь до цели."],
     ["#integrCards","Возможности","«Здоровье», выгрузка в Excel, напоминания бота и вход в аккаунт."],
+    ["#coachCards .card","Кабинет тренера","Если ты тренер или нутрициолог — включи кабинет и пригласи клиентов. А если у тебя есть тренер, здесь видно, кому открыт доступ."],
     ["#tipsCard","Подсказки","Здесь подсказки можно выключить или посмотреть заново."]
   ]
 };
@@ -2613,6 +2618,159 @@ function renderTipsCard(){
   go=function(t){ if(tourOn){ tourOn.ov.remove(); tourOn=null; } _go(t); maybeTour(t); };
   document.addEventListener("change",e=>{ if(e.target&&e.target.id==="tipsOn"){ const s=tipsState(); s.off=!e.target.checked; tipsSave(s); toast(s.off?"Подсказки выключены":"Подсказки включены"); } });
   document.addEventListener("click",e=>{ const b=e.target.closest&&e.target.closest("#tipsAgain"); if(!b) return; const s=tipsState(); s.off=false; s.seen={}; tipsSave(s); renderTipsCard(); go("diary"); });
+})();
+
+/* ================= КАБИНЕТ ТРЕНЕРА ================= */
+let coachState=null;          // для клиента: {trainers, comments}
+let trState=null;             // для тренера: {on, link, clients:[{uid,name,docs,comments}], limit}
+let tcView=null;              // открытый клиент: {uid, name, docs, comments, date, sub}
+function withDocs(docs,fn){ const save=Store.docs; Store.docs=docs||{}; try{ return fn(); } finally{ Store.docs=save; } }
+const plural=(n,a,b,c)=>{ n=Math.abs(n)%100; const d=n%10; return n>10&&n<20?c:d===1?a:d>=2&&d<=4?b:c; };
+const agoTxt=d=>{ if(!d) return "ещё не записывал(а) еду"; const n=Math.round((parseD(today())-parseD(d))/864e5); return n<=0?"записывал(а) сегодня":n===1?"последняя запись вчера":`последняя запись ${n} ${plural(n,"день","дня","дней")} назад`; };
+function clientSummary(docs){
+  return withDocs(docs,()=>{
+    const p=profile(), c=calc(), td=today(), t=dayTotals(td);
+    const days=allDays().filter(d=>getDay(d).meals.length), last=days[days.length-1]||null;
+    let wk=0,wkN=0,inNorm=0; for(let i=1;i<=7;i++){ const d=addDays(td,-i), x=dayTotals(d); if(getDay(d).meals.length){ wkN++; wk+=x.kcal; if(c&&x.kcal<=c.kcal+x.burn) inNorm++; } }
+    const w=weights(), wNow=c?c.w:null, w30=w.find(x=>x.date>=addDays(td,-30)), wFrom=w30?w30.w:(p?p.w0:null);
+    return {hasProfile:!!p, norm:c?c.kcal:0, today:t, last, wkAvg:wkN?wk/wkN:0, wkN, inNorm, wNow, wDiff:(wNow!=null&&wFrom!=null)?wNow-wFrom:null, goal:p?p.goal:null};
+  });
+}
+async function trLoad(){
+  if(!serverReady()||!serverInfo||serverInfo.error) return;
+  try{
+    const r=await sapi("trainer"); if(!r.on){ trState={on:false}; renderCoachCards(); return; }
+    trState={...r, clients:r.clients.map(c=>({...c}))};
+    await Promise.all(trState.clients.map(async c=>{ try{ const d=await sapi("trainer/client?uid="+encodeURIComponent(c.uid)); c.docs=d.docs; c.comments=d.comments; c.sum=clientSummary(d.docs); }catch(e){ c.err=errText(e); } }));
+  }catch(e){ trState={on:false,err:errText(e)}; }
+  renderCoachCards();
+}
+function renderCoachCards(){
+  const el=$("coachCards"); if(!el) return;
+  if(!serverReady()||!serverInfo||serverInfo.error){ el.innerHTML=""; return; }
+  let html="";
+  // клиент: мои тренеры
+  if(coachState&&coachState.trainers&&coachState.trainers.length){
+    html+=`<div class="card stack"><h2>Мой тренер</h2>${coachState.trainers.map(t=>`<div class="row" style="justify-content:space-between"><span><b>${esc(t.name)}</b><br><span class="small muted">видит дневник, вес и прогресс</span></span><button data-coachleave="${esc(t.uid)}">Закрыть доступ</button></div>`).join("")}</div>`;
+  }
+  // тренер
+  if(!trState){ html+=`<div class="card stack"><h2>Кабинет тренера</h2><p class="note" style="margin:0">Загружаю…</p></div>`; }
+  else if(!trState.on){
+    html+=`<div class="card stack"><h2>Кабинет тренера</h2><p class="note" style="margin:0">Для тренеров и нутрициологов: клиенты дают доступ к своему дневнику, а ты видишь их питание, вес и прогресс, оставляешь комментарии и получаешь утреннюю сводку в боте. Бесплатно до ${FREE_LIMIT} клиентов.</p><button id="trEnable">Я тренер — включить кабинет</button></div>`;
+  } else {
+    const cl=trState.clients||[];
+    html+=`<div class="card stack"><div class="row" style="justify-content:space-between"><h2>Кабинет тренера</h2><span class="small muted num">клиентов ${cl.length} из ${trState.limit}</span></div>
+      <p class="note" style="margin:0">Отправь клиенту ссылку — он нажмёт «Разрешить», и его дневник появится здесь.</p>
+      <div class="row"><button class="primary grow" id="trInvite">Пригласить клиента</button><button class="grow" id="trCopy">Скопировать ссылку</button></div>
+      ${cl.length?cl.map(c=>trClientRow(c)).join(""):`<div class="empty" style="padding:14px">Клиентов пока нет.</div>`}
+      <button class="ghost small" id="trDisable" style="padding:0;align-self:flex-start">Выключить кабинет</button></div>`;
+  }
+  el.innerHTML=html;
+}
+const FREE_LIMIT=3;
+function trClientRow(c){
+  if(c.err) return `<div class="card" style="padding:12px"><b>${esc(c.name)}</b><div class="small" style="color:var(--warn)">${esc(c.err)}</div></div>`;
+  const s=c.sum||{}; const n=s.norm, k=s.today?s.today.kcal:0, burn=s.today?s.today.burn:0;
+  const todayTxt=!s.hasProfile?"профиль не заполнен":k?`сегодня ${fmt(k)}${n?` из ${fmt(n+burn)}`:""} ккал ${n?(k<=n+burn?"✅":"⚠️"):""}`:"сегодня записей нет";
+  return `<div class="stack" style="gap:4px;border-top:1px solid var(--line);padding-top:10px">
+    <div class="row" style="justify-content:space-between;align-items:flex-start"><div style="min-width:0"><b>${esc(c.name)}</b><div class="small muted">${agoTxt(s.last)}</div></div><button class="primary" data-tropen="${esc(c.uid)}">Открыть</button></div>
+    <div class="small num">${todayTxt}</div>
+    <div class="small muted num">неделя: ${s.wkN?`в среднем ${fmt(s.wkAvg)} ккал, в норме ${s.inNorm} из ${s.wkN} ${plural(s.wkN,"дня","дней","дней")}`:"записей нет"}${s.wNow!=null?` · вес ${fmt(s.wNow,1)} кг${s.wDiff?` (${s.wDiff>0?"+":"−"}${fmt(Math.abs(s.wDiff),1)} за месяц)`:""}`:""}</div>
+    <button class="ghost small" data-trremove="${esc(c.uid)}" style="padding:0;align-self:flex-start;color:var(--muted)">Убрать клиента</button></div>`;
+}
+/* --- просмотр клиента --- */
+function trOpen(uid){
+  const c=(trState.clients||[]).find(x=>x.uid===uid); if(!c||!c.docs) return;
+  tcView={uid, name:c.name, docs:c.docs, comments:c.comments||[], date:today(), sub:"day"};
+  openSheet(`<div class="row" style="justify-content:space-between"><h2>${esc(c.name)}</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
+    <div class="seg" id="tcSeg"><button data-tcsub="day">Дневник</button><button data-tcsub="prog">Вес и прогресс</button></div><div id="tcBody" class="stack"></div>`);
+  $("tcSeg").onclick=e=>{ const b=e.target.closest("[data-tcsub]"); if(b){ tcView.sub=b.dataset.tcsub; tcRender(); } };
+  $("tcBody").addEventListener("click",tcClick);
+  tcRender();
+}
+function tcRender(){
+  if(!tcView||!$("tcBody")) return;
+  document.querySelectorAll("#tcSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.tcsub===tcView.sub?"true":"false"));
+  $("tcBody").innerHTML = withDocs(tcView.docs,()=> tcView.sub==="day"?tcDayHtml():tcProgHtml());
+}
+function tcDayHtml(){
+  const d=tcView.date, c=calc(), t=dayTotals(d), day=getDay(d), n=c?c.kcal:0;
+  const byMeal=MEALS.map(m=>[m,day.meals.filter(x=>x.meal===m)]).filter(x=>x[1].length);
+  const com=tcView.comments.filter(x=>x.date===d);
+  return `<div class="datebar"><button data-tcd="-1" aria-label="Предыдущий день">‹</button><div class="d">${d===today()?"Сегодня":human(d)}</div><button data-tcd="1" aria-label="Следующий день" ${d>=today()?"disabled":""}>›</button></div>
+    <div class="card"><div class="kv">
+      <span>Съедено</span><b>${fmt(t.kcal)} ккал</b>
+      <span>Норма</span><b>${n?fmt(n+t.burn)+" ккал":"–"}${n?` ${t.kcal<=n+t.burn?"✅":"⚠️"}`:""}</b>
+      <span>Белки / жиры / углеводы</span><b>${fmt(t.p)} / ${fmt(t.f)} / ${fmt(t.c)} г</b>
+      ${t.burn?`<span>Сожжено</span><b>${fmt(t.burn)} ккал</b>`:""}${t.steps?`<span>Шаги</span><b>${fmt(t.steps)}</b>`:""}
+    </div></div>
+    ${byMeal.length?byMeal.map(([m,list])=>{ const tt=list.reduce((a,x)=>a+x.kcal*x.g/100,0); return `<div class="card stack" style="gap:6px"><div class="row" style="justify-content:space-between"><b>${m}</b><span class="small muted num">${fmt(tt)} ккал</span></div>${list.map(x=>`<div class="row small" style="justify-content:space-between"><span>${esc(x.name)} · ${fmt(x.g)} г</span><span class="num">${fmt(x.kcal*x.g/100)}</span></div>`).join("")}</div>`; }).join(""):`<div class="empty">В этот день записей нет.</div>`}
+    ${day.workouts.length?`<div class="card small">${day.workouts.map(w=>`🏃 ${esc(w.type||w.name||"Тренировка")} · ${fmt(w.min)} мин · ${fmt(w.kcal)} ккал`).join("<br>")}</div>`:""}
+    <div class="card stack"><h2>Комментарии</h2>
+      ${com.length?com.map(x=>`<div class="row small" style="justify-content:space-between;align-items:flex-start"><span>${x.meal?`<b>${esc(x.meal)}:</b> `:""}${esc(x.text)}</span><button class="icon" data-tccdel="${esc(x.id)}" aria-label="Удалить">✕</button></div>`).join(""):`<p class="note" style="margin:0">Пока нет. Клиент получит уведомление в боте.</p>`}
+      <select id="tcMeal" aria-label="К чему комментарий"><option value="">Ко всему дню</option>${byMeal.map(([m])=>`<option>${m}</option>`).join("")}</select>
+      <textarea id="tcText" rows="3" placeholder="Например: «Отличный обед! Вечером добавь белка»" style="font:inherit;font-size:15px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px"></textarea>
+      <button class="primary" id="tcSend">Отправить комментарий</button>
+    </div>`;
+}
+function tcProgHtml(){
+  const p=profile(), c=calc();
+  if(!p) return `<div class="empty">Клиент ещё не заполнил профиль.</div>`;
+  const w=weights(), lost=p.w0-c.w;
+  return `<div class="tiles">
+      <div class="tile"><div class="v">${fmt(p.w0,1)}</div><div class="l">Старт, кг</div></div>
+      <div class="tile"><div class="v">${fmt(c.w,1)}</div><div class="l">Сейчас, кг</div></div>
+      <div class="tile"><div class="v ${lost>0?"pos":""}">${lost>0?"−":""}${fmt(Math.abs(lost),1)}</div><div class="l">Сброшено, кг</div></div>
+      <div class="tile"><div class="v">${fmt(c.left,1)}</div><div class="l">До цели, кг</div></div>
+      <div class="tile"><div class="v">${fmt(c.kcal)}</div><div class="l">Норма, ккал</div></div>
+      <div class="tile"><div class="v">${p.sex==="Мужской"?"М":"Ж"}, ${fmt(p.age)}</div><div class="l">${fmt(p.h)} см · ИМТ ${fmt(c.bmi,1)}</div></div>
+    </div>
+    <div class="card stack chart"><h2>Вес</h2>${weightChart(w,p)}</div>
+    <div class="card stack chart"><h2>Калории за 30 дней</h2>${kcalChart(c.kcal)}</div>`;
+}
+async function tcClick(e){
+  const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.tcd){ tcView.date=addDays(tcView.date,+b.dataset.tcd); if(tcView.date>today()) tcView.date=today(); tcRender(); return; }
+  if(b.dataset.tccdel){ try{ await sapi("trainer/comment/delete",{client:tcView.uid,id:b.dataset.tccdel}); tcView.comments=tcView.comments.filter(x=>x.id!==b.dataset.tccdel); syncTrComments(); tcRender(); }catch(err){ toast(errText(err)); } return; }
+  if(b.id==="tcSend"){
+    const text=$("tcText").value.trim(); if(!text){ toast("Напиши комментарий"); return; }
+    b.disabled=true;
+    try{ const r=await sapi("trainer/comment",{client:tcView.uid,date:tcView.date,meal:$("tcMeal").value||null,text}); tcView.comments.unshift(r.comment); syncTrComments(); toast("Отправлено — клиент получит уведомление"); tcRender(); }
+    catch(err){ b.disabled=false; toast(errText(err)); }
+  }
+}
+function syncTrComments(){ const c=(trState&&trState.clients||[]).find(x=>x.uid===tcView.uid); if(c) c.comments=tcView.comments; }
+/* --- клиент: приглашение и комментарии в дневнике --- */
+async function coachJoinPrompt(code){
+  if(!serverReady()){ toast("Для этого нужен сервер приложения"); return; }
+  let pv; try{ pv=await sapi("coach/preview",{code}); }catch(e){ toast(errText(e)); return; }
+  if(pv.self){ toast("Это твоя ссылка тренера — отправь её клиентам"); return; }
+  if(pv.already){ toast(`У тренера ${pv.name} уже есть доступ`); return; }
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Доступ для тренера</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <p style="margin:0">Тренер <b>${esc(pv.name)}</b> просит доступ к твоему дневнику.</p>
+    <p class="note" style="margin:0">Тренер будет видеть дневник питания, вес и прогресс и сможет оставлять комментарии. Изменить твои записи он не сможет. Закрыть доступ можно в любой момент в «Профиле».</p>
+    <div class="row"><button class="grow" data-close2>Не сейчас</button><button class="primary grow" id="coachYes">Разрешить</button></div>`);
+  $("coachYes").onclick=async()=>{ try{ const r=await sapi("coach/join",{code}); coachState={trainers:r.trainers,comments:r.comments}; closeSheet2(); toast(`Готово! ${pv.name} видит твой дневник`); renderCoachCards(); }catch(e){ toast(errText(e)); } };
+}
+function renderCoachNotes(){
+  const el=$("coachNotes"); if(!el) return;
+  const list=(coachState&&coachState.comments||[]).filter(x=>x.date===curDate);
+  el.hidden=!list.length; if(!list.length){ el.innerHTML=""; return; }
+  el.innerHTML=`<div class="row" style="justify-content:space-between"><b>💬 Комментарии тренера</b></div>${list.map(x=>`<div class="small" style="margin-top:6px"><b>${esc(x.name)}</b>${x.meal?` · ${esc(x.meal)}`:""} <span class="muted">${new Date(x.at).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span><br>${esc(x.text)}</div>`).join("")}`;
+}
+(function hookCoach(){
+  const _rd=renderDiary; renderDiary=function(){ _rd(); try{ renderCoachNotes(); }catch(e){} };
+  const _rs=renderServerCards; renderServerCards=function(){ _rs(); try{ renderCoachCards(); }catch(e){} };
+  document.addEventListener("click",async e=>{
+    const b=e.target.closest&&e.target.closest("button"); if(!b) return;
+    if(b.id==="trEnable"){ try{ await sapi("trainer/enable",{}); toast("Кабинет тренера включён"); trState=null; renderCoachCards(); trLoad(); }catch(err){ toast(errText(err)); } }
+    else if(b.id==="trDisable"){ if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Точно выключить? Клиенты останутся, но новые не смогут подключиться"; return; } try{ await sapi("trainer/disable",{}); trState={on:false}; renderCoachCards(); }catch(err){ toast(errText(err)); } }
+    else if(b.id==="trInvite"&&trState&&trState.link){ openExternal("https://t.me/share/url?url="+encodeURIComponent(trState.link)+"&text="+encodeURIComponent("Дай мне доступ к своему дневнику питания — я буду смотреть твоё питание и вес и подсказывать. Нажми на ссылку:")); }
+    else if(b.id==="trCopy"&&trState&&trState.link){ try{ await navigator.clipboard.writeText(trState.link); toast("Ссылка скопирована"); }catch(err){ toast("Не получилось скопировать — нажми «Пригласить клиента»"); } }
+    else if(b.dataset.tropen){ trOpen(b.dataset.tropen); }
+    else if(b.dataset.trremove){ if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Точно убрать? Нажми ещё раз"; return; } try{ await sapi("trainer/remove",{client:b.dataset.trremove}); trState.clients=trState.clients.filter(x=>x.uid!==b.dataset.trremove); renderCoachCards(); }catch(err){ toast(errText(err)); } }
+    else if(b.dataset.coachleave){ if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Точно закрыть? Нажми ещё раз"; return; } try{ const r=await sapi("coach/leave",{trainer:b.dataset.coachleave}); coachState={trainers:r.trainers,comments:r.comments}; toast("Доступ закрыт"); renderCoachCards(); renderCoachNotes(); }catch(err){ toast(errText(err)); } }
+  });
 })();
 
 function bindMenu(){

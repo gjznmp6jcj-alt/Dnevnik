@@ -576,6 +576,118 @@ function introText(name) {
 Команды: /today — итог дня, /week — отчёт за неделю, /stop — выключить напоминания.`;
 }
 
+/* ---------------- кабинет тренера ---------------- */
+const FREE_CLIENTS = 3;
+const userName = async (env, uid) => (await env.KV.get(`n:${uid}`)) || "Без имени";
+async function coachInfo(env, uid) {   // для клиента: кто имеет доступ и комментарии
+  const ids = await kget(env, `cl:${uid}`, []);
+  const trainers = [];
+  for (const t of ids) { const tp = await kget(env, `tp:${t}`); trainers.push({ uid: t, name: (tp && tp.name) || await userName(env, t) }); }
+  const comments = (await kget(env, `cm:${uid}`, [])).slice(0, 120);
+  return { trainers, comments };
+}
+async function trainerApi(env, user, p, body, req, url) {
+  const me = user.id;
+  const linkFor = async code => { const bot = await botUsername(env); return `https://t.me/${bot}?startapp=t_${code}`; };
+  if (p === "trainer" && req.method === "GET") {
+    const tp = await kget(env, `tp:${me}`);
+    if (!tp || !tp.on) return json({ on: false });
+    const ids = await kget(env, `tl:${me}`, []), clients = [];
+    for (const c of ids) clients.push({ uid: c, name: await userName(env, c) });
+    return json({ on: true, name: tp.name, code: tp.code, link: await linkFor(tp.code), clients, limit: FREE_CLIENTS });
+  }
+  if (p === "trainer/enable") {
+    let tp = await kget(env, `tp:${me}`);
+    if (!tp) { let code; do { code = rid(8); } while (await env.KV.get(`tc:${code}`)); tp = { code }; await env.KV.put(`tc:${code}`, me); }
+    tp.on = true; tp.name = String(body.name || tp.name || user.name).slice(0, 40);
+    await kput(env, `tp:${me}`, tp);
+    return json({ ok: true, link: await linkFor(tp.code) });
+  }
+  if (p === "trainer/disable") {
+    const tp = await kget(env, `tp:${me}`); if (tp) { tp.on = false; await kput(env, `tp:${me}`, tp); }
+    return json({ ok: true });
+  }
+  if (p === "trainer/client") {   // дневник клиента — только просмотр
+    const c = String(url.searchParams.get("uid") || body.uid || "");
+    if (!(await kget(env, `tl:${me}`, [])).includes(c)) return json({ error: "Нет доступа к этому клиенту" }, 403);
+    const pre = `u:${c}:d:`, docs = {}, since = addDays(new Date().toISOString().slice(0, 10), -90);
+    for (const [k, v] of await env.KV.listPrefix(pre)) {
+      const key = k.slice(pre.length);
+      if (key === "profile" || key === "weights" || (/^d-\d{4}-\d{2}-\d{2}$/.test(key) && key.slice(2) >= since)) { try { const d = JSON.parse(v); if (d && d.v != null) docs[key] = d.v; } catch (e) {} }
+    }
+    const comments = (await kget(env, `cm:${c}`, [])).filter(x => x.from === me);
+    return json({ uid: c, name: await userName(env, c), docs, comments });
+  }
+  if (p === "trainer/comment") {
+    const c = String(body.client || ""), txt = String(body.text || "").trim().slice(0, 1000);
+    if (!(await kget(env, `tl:${me}`, [])).includes(c)) return json({ error: "Нет доступа к этому клиенту" }, 403);
+    if (!txt || !/^\d{4}-\d{2}-\d{2}$/.test(body.date || "")) return json({ error: "Пустой комментарий" }, 400);
+    const tp = await kget(env, `tp:${me}`), tname = (tp && tp.name) || user.name;
+    const it = { id: rid(10), from: me, name: tname, date: body.date, meal: body.meal ? String(body.meal).slice(0, 80) : null, text: txt, at: Date.now() };
+    const list = [it, ...(await kget(env, `cm:${c}`, []))].slice(0, 200);
+    await kput(env, `cm:${c}`, list);
+    const d = body.date.split("-").reverse().slice(0, 2).join(".");
+    await send(env, c, `💬 <b>Тренер ${esc(tname)}</b> — комментарий к ${d}${it.meal ? ` (${esc(it.meal)})` : ""}:\n\n${esc(txt)}`, { reply_markup: openBtn(env) });
+    return json({ ok: true, comment: it });
+  }
+  if (p === "trainer/comment/delete") {
+    const c = String(body.client || "");
+    const list = (await kget(env, `cm:${c}`, [])).filter(x => !(x.id === body.id && x.from === me));
+    await kput(env, `cm:${c}`, list); return json({ ok: true });
+  }
+  if (p === "trainer/remove") {
+    const c = String(body.client || "");
+    await kput(env, `tl:${me}`, (await kget(env, `tl:${me}`, [])).filter(x => x !== c));
+    await kput(env, `cl:${c}`, (await kget(env, `cl:${c}`, [])).filter(x => x !== me));
+    return json({ ok: true });
+  }
+  /* --- сторона клиента --- */
+  if (p === "coach" && req.method === "GET") return json(await coachInfo(env, me));
+  if (p === "coach/preview") {
+    const t = await env.KV.get(`tc:${String(body.code || "").replace(/[^a-z0-9]/g, "")}`);
+    const tp = t ? await kget(env, `tp:${t}`) : null;
+    if (!tp || !tp.on) return json({ error: "Приглашение не найдено или тренер выключил кабинет" }, 404);
+    return json({ name: tp.name, self: t === me, already: (await kget(env, `cl:${me}`, [])).includes(t) });
+  }
+  if (p === "coach/join") {
+    const t = await env.KV.get(`tc:${String(body.code || "").replace(/[^a-z0-9]/g, "")}`);
+    const tp = t ? await kget(env, `tp:${t}`) : null;
+    if (!tp || !tp.on) return json({ error: "Приглашение не найдено или тренер выключил кабинет" }, 404);
+    if (t === me) return json({ error: "Это твоя собственная ссылка тренера" }, 400);
+    const tl = await kget(env, `tl:${t}`, []);
+    if (!tl.includes(me)) {
+      if (tl.length >= FREE_CLIENTS) return json({ error: `У тренера уже ${FREE_CLIENTS} клиента — это максимум на бесплатном тарифе. Напиши ему об этом.` }, 400);
+      tl.push(me); await kput(env, `tl:${t}`, tl);
+      const cl = await kget(env, `cl:${me}`, []); if (!cl.includes(t)) { cl.push(t); await kput(env, `cl:${me}`, cl); }
+      await send(env, t, `👋 Новый клиент: <b>${esc(user.name)}</b> дал(а) доступ к дневнику. Открой «Профиль» → «Кабинет тренера».`, { reply_markup: openBtn(env) });
+    }
+    return json({ ok: true, ...(await coachInfo(env, me)) });
+  }
+  if (p === "coach/leave") {
+    const t = String(body.trainer || "");
+    await kput(env, `cl:${me}`, (await kget(env, `cl:${me}`, [])).filter(x => x !== t));
+    await kput(env, `tl:${t}`, (await kget(env, `tl:${t}`, [])).filter(x => x !== me));
+    await send(env, t, `${esc(user.name)} закрыл(а) тебе доступ к своему дневнику.`);
+    return json({ ok: true, ...(await coachInfo(env, me)) });
+  }
+  return json({ error: "unknown" }, 404);
+}
+/* утренняя сводка тренеру */
+async function trainerMorning(env, uid, yesterday) {
+  const tp = await kget(env, `tp:${uid}`); if (!tp || !tp.on) return;
+  const ids = await kget(env, `tl:${uid}`, []); if (!ids.length) return;
+  const lines = [];
+  for (const c of ids) {
+    const name = await userName(env, c), d = await kget(env, `d:${c}:${yesterday}`);
+    if (!d || !d.n) { lines.push(`❗ <b>${esc(name)}</b> — не записывал(а) еду`); continue; }
+    const norm = (d.norm || 0) + (d.burn || 0);
+    if (!norm) { lines.push(`• <b>${esc(name)}</b> — ${fmt(d.kcal)} ккал`); continue; }
+    const diff = d.kcal - norm;
+    lines.push(diff > 100 ? `⚠️ <b>${esc(name)}</b> — ${fmt(d.kcal)} из ${fmt(norm)} ккал, перебор ${fmt(diff)}` : `✅ <b>${esc(name)}</b> — ${fmt(d.kcal)} из ${fmt(norm)} ккал`);
+  }
+  await send(env, uid, `☀️ <b>Клиенты за вчера</b>\n\n${lines.join("\n")}`, { reply_markup: openBtn(env, "Открыть кабинет") });
+}
+
 /* ---------------- статистика для владельца ---------------- */
 async function statsText(env, users) {
   const now = Date.now(), DAY = 864e5;
@@ -657,7 +769,7 @@ async function api(req, env, url, user, ctx) {
   if (p === "data" && req.method === "GET") {
     const pre = `u:${user.id}:d:`, rows = await env.KV.listPrefix(pre), docs = {};
     for (const [k, v] of rows) { try { docs[k.slice(pre.length)] = JSON.parse(v); } catch (e) {} }
-    return json({ docs, me: { id: user.id, name: user.name }, health: await kget(env, `hp:${user.id}`) });
+    return json({ docs, me: { id: user.id, name: user.name }, health: await kget(env, `hp:${user.id}`), coach: await coachInfo(env, user.id) });
   }
   if (p === "data") {   // {docs:{key:{v,at}}} — побеждает более свежая запись
     const pre = `u:${user.id}:d:`, incoming = body.docs || {}, keys = Object.keys(incoming).filter(k => /^[A-Za-z0-9_\-]{1,64}$/.test(k)).slice(0, 400);
@@ -694,6 +806,7 @@ async function api(req, env, url, user, ctx) {
     return json({ ok: !!r.ok, error: r.ok ? null : (r.description || "send failed") });
   }
   if (p.startsWith("family")) return await family(env, user, p, body, req);
+  if (p.startsWith("trainer") || p.startsWith("coach")) return await trainerApi(env, user, p, body, req, url);
   return json({ error: "unknown" }, 404);
 }
 
@@ -852,6 +965,7 @@ async function runCron(env, now) {
       }
       if (s.summary.on && slot(s.summary.time) === hm) { const d = await kget(env, `d:${uid}:${today}`); if (d && d.n) await send(env, uid, await dayText(env, uid, today), { reply_markup: openBtn(env) }); }
       if (s.weigh.on && dow === +s.weigh.day && slot(s.weigh.time) === hm) await send(env, uid, "⚖️ Доброе утро! Сегодня день взвешивания — встань на весы натощак и запиши вес.", { reply_markup: openBtn(env, "Записать вес") });
+      if (hm === "08:00") await trainerMorning(env, uid, addDays(today, -1));
       if (s.weekly.on && dow === 0 && slot(s.weekly.time) === hm) { const wt = await weekText(env, uid, today); if (!wt.includes("записей нет")) await send(env, uid, wt, { reply_markup: openBtn(env) }); }
     } catch (e) { /* один пользователь не должен ломать остальных */ }
   }
