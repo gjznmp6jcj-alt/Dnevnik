@@ -357,7 +357,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note">Версия приложения: 2026-10-25 · 24</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-25 · 25</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -375,6 +375,12 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
 <div id="sheetRoot2"></div>
 
 <script>
+/* тестовая копия (адрес …-test/): свои данные на телефоне, отдельно от основной */
+const IS_TEST=/-test\//i.test(location.pathname);
+if(IS_TEST){ try{ const P="test:", S=Storage.prototype, g=S.getItem, st=S.setItem, r=S.removeItem;
+  S.getItem=function(k){ return g.call(this,P+k); }; S.setItem=function(k,v){ return st.call(this,P+k,v); }; S.removeItem=function(k){ return r.call(this,P+k); };
+  document.addEventListener("DOMContentLoaded",()=>{ const b=document.createElement("div"); b.textContent="ТЕСТ"; b.style.cssText="position:fixed;top:calc(6px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:80;background:#E5484D;color:#fff;font:700 11px/1 system-ui;letter-spacing:.1em;padding:4px 10px;border-radius:999px;pointer-events:none"; document.body.appendChild(b); const v=document.getElementById("verLine"); if(v) v.insertAdjacentHTML("beforeend"," · <b style=\"color:#E5484D\">тестовая копия</b>"); });
+}catch(e){} }
 "use strict";
 /* ---------- Справочник (на 100 г): название, ккал, Б, Ж, У ---------- */
 const BASE_FOODS = [

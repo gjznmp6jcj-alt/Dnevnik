@@ -1,9 +1,11 @@
 // Офлайн-режим: страница — всегда свежая из сети, без интернета — сохранённая копия.
+// Основная (…/Dnevnik/) и тестовая (…/Dnevnik-test/) копии не мешают друг другу.
 // Картинки и библиотеки — из кэша. Запросы к серверу дневника и config.json НЕ кэшируются никогда.
-const CACHE = "dnevnik-v5";
+const SUFFIX = "|" + self.registration.scope;   // у основной и тестовой копии — свои кэши
+const CACHE = "dnevnik-v6" + SUFFIX;
 const CORE = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
-self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
+self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && (k.endsWith(SUFFIX) || !k.includes("|"))).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
