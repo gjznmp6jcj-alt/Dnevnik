@@ -86,7 +86,7 @@ const text = (t, status = 200) => new Response(t, { status, headers: { "content-
 function cors(res, req) {
   const h = new Headers(res.headers);
   h.set("access-control-allow-origin", req.headers.get("origin") || "*");
-  h.set("access-control-allow-headers", "content-type, x-tg-init");
+  h.set("access-control-allow-headers", "content-type, x-tg-init, x-session");
   h.set("access-control-allow-methods", "GET, POST, OPTIONS");
   h.set("access-control-max-age", "86400");
   return new Response(res.body, { status: res.status, headers: h });
