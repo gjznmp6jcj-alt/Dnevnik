@@ -364,7 +364,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 37</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 38</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1838,9 +1838,33 @@ function openPlanInfo(id,portionsArg){
     catch(err){ b.disabled=false; b.textContent=was; toast(errText(err)); }
   };
 }
+/* как продукт покупают в магазине: «варёное яйцо» → «Яйцо», «запечённые тефтели» → фарш, «огурец свежий» → «Огурец» */
+const COOKED_RE=/\s*(?<![а-яёa-z])(варён\S*|варен\S*|отварн\S*|запечён\S*|запечен\S*|жарен\S*|тушён\S*|тушен\S*|готов\S*|на пару|гриль|обжарен\S*|свеж\S*|нарезан\S*|приготовлен\S*)(?![а-яёa-z])/gi;
+const BUY_ALIASES=[
+  [/^яйц|^яйко/,"Яйцо куриное",1],
+  [/^(огурц|огурец)/,"Огурец",1],[/черри/,"Помидоры черри",1],[/^(помидор|томат)(?!.*(сок|паст|консерв|соус|вял|сушен))/,"Помидор",1],
+  [/^лук(?! зел)/,"Лук репчатый",null],[/^морков/,"Морковь",null],[/^свекл|^свёкл/,"Свёкла",null],[/^картоф|^картош/,"Картофель",null],[/^капуст[аы]?\s*(белокоч)?$|^капуста белокочанная/,"Капуста белокочанная",null],
+  [/^масло (растит|подсолн)/,"Масло подсолнечное",1],[/^банан/,"Банан",1],[/^яблок/,"Яблоко",1],
+  [/тефтел|котлет|фрикадел/,"FARSH",1.1],[/^(говяж\S* )?фарш|фарш говяж/,"Фарш говяжий",null],[/фарш (кур|индей)/,"Фарш куриный",null],
+  [/^курин\S* грудк|^грудк\S* курин|^филе курин|^куриное филе/,"Куриная грудка",null],[/^курин\S* бедр|^бедр/,"Куриные бёдра",null],[/^куриц/,"Курица",null],
+  [/^индейк|^филе индейк/,"Индейка филе",null],[/^говядин/,"Говядина",null],[/^свинин/,"Свинина",null],
+];
+function buyForm(name,g){
+  if(RAW_MAP[name]){ const r=RAW_MAP[name]; return {name:r[0],g:g*r[1],conv:true}; }
+  const raw=norm(name), cooked=/(варён|варен|отварн|запечён|запечен|жарен|тушён|тушен|готов|на пару|гриль|обжарен)/.test(raw);
+  let clean=raw.replace(COOKED_RE,"").replace(/\s+/g," ").trim();
+  const meat=/(куриц|курин|грудк|бедр|индейк|говяд|свинин|фарш|тефтел|котлет|фрикадел|рыб|лосос|треск|минта|горбуш|хек)/.test(clean);
+  let k=1;
+  if(cooked){ if(meat) k=1.35; else if(/лук|морков|кабач|баклаж|перец|овощ|гриб|шпинат/.test(clean)) k=/гриб|шпинат/.test(clean)?1.6:1.25; }
+  for(const [re,to,fk] of BUY_ALIASES){ if(re.test(clean)){
+    let nm=to; if(to==="FARSH") nm=/кур|индей/.test(clean)?"Фарш куриный":/свин/.test(clean)?"Фарш свино-говяжий":"Фарш говяжий";
+    const kk=fk||k; return {name:nm,g:g*kk,conv:kk!==1}; } }
+  const nice=clean? clean.charAt(0).toUpperCase()+clean.slice(1) : name;
+  return {name:nice,g:g*k,conv:k!==1};
+}
 function shopItems(){
   const w=getWeek(menuWeek), from=(shopFromToday && mondayOf(today())===menuWeek)? today() : menuWeek, map=new Map(), cooks=new Map();
-  const addItem=(name,g)=>{ let conv=false; const r=RAW_MAP[name]; if(r){ name=r[0]; g*=r[1]; conv=true; } const k=norm(name), cur=map.get(k)||{name,g:0,conv:false}; cur.g+=g; cur.conv=cur.conv||conv; map.set(k,cur); };
+  const addItem=(name0,g0)=>{ const b=buyForm(name0,g0), name=b.name, g=b.g, conv=b.conv; const k=norm(name), cur=map.get(k)||{name,g:0,conv:false}; cur.g+=g; cur.conv=cur.conv||conv; map.set(k,cur); };
   for(let i=0;i<7;i++){ const d=addDays(menuWeek,i); if(d<from) continue;
     (w.days[d]||[]).forEach(e=>{
       if(e.ing&&e.totalG){ const pg=e.portionG||e.totalG, k=e.dishId||norm(e.name), cur=cooks.get(k)||{name:e.name,ing:e.ing,portions:Math.max(1,Math.round(e.totalG/pg)),P:0}; cur.P+=e.g/pg; cooks.set(k,cur); }
@@ -1864,7 +1888,7 @@ function renderShop(){
       ${[...un,...done].map(i=>{ const k=norm(i.name), b=!!bought[k]; return `<label class="shop${b?" done":""}"><input type="checkbox" data-buy="${esc(k)}" ${b?"checked":""}><span class="grow">${esc(i.name)}${i.conv?' <span class="tag">пересчитано</span>':""}</span><b class="num">${shopQty(i)}</b></label>`; }).join("")}</div>
       ${shopCooks.length?`<div class="card"><h2 style="margin-bottom:4px">Готовка</h2>${shopCooks.map(c=>`<div class="shop" style="cursor:default"><span class="grow">${esc(c.name)}</span><span class="small muted num" style="text-align:right">${c.times>1?c.times+" раза":"1 раз"} · ${c.portions*c.times} порц.<br>в меню ${fmt(c.P,1).replace(",0","")} порц.</span></div>`).join("")}<p class="note" style="margin:8px 0 0">Продукты для блюд считаются на целые готовки: рецепт на 4 порции покупается полностью, даже если в меню одна порция.</p></div>`:""}
       <div class="row"><button class="primary grow" id="shopCopy">Скопировать список</button>${done.length?`<button class="grow" id="shopReset">Снять отметки</button>`:""}</div>
-      <p class="note">«Пересчитано» — крупы, бобовые и мясо, записанные в готовом виде, переведены в сухой или сырой вес, в котором их покупают. Количество — ориентир.</p>`
+      <p class="note">«Пересчитано» — крупы, бобовые, мясо и тушёные овощи, записанные в готовом виде, переведены в сухой или сырой вес, в котором их покупают; тефтели и котлеты — в фарш. Количество — ориентир.</p>`
    : `<div class="empty">Список покупок соберётся сам, когда в меню${thisWeek&&shopFromToday?" с сегодняшнего дня":" на эту неделю"} появятся блюда или продукты.</div>`);
 }
 function eatPlan(date, ids){
