@@ -364,7 +364,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 33</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 34</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1702,7 +1702,7 @@ function renderPlan(){
     <div class="macros">${mac("Белки",t.p,c?.p,"var(--prot)")}${mac("Жиры",t.f,c?.f,"var(--fat)")}${mac("Углеводы",t.c,c?.c,"var(--carb)")}</div></div>`;
   html+=MEALS.map(m=>{ const items=entries.filter(e=>e.meal===m), s=planTotals(items).kcal;
     return `<div class="card meal"><h3>${m}<span>${s?fmt(s)+" ккал":""}</span></h3>${items.map(e=>`
-      <div class="item"><div class="n">${esc(e.name)}${e.ing?' <span class="tag">блюдо</span>':""}${e.eaten&&dIds.has(e.eaten)?' <span class="tag">✓ съедено</span>':""}<small class="num">${e.ing&&e.portionG?fmt(e.g/e.portionG,1).replace(",0","")+" порц. · ":""}Б ${fmt(e.p*e.g/100,1)} · Ж ${fmt(e.f*e.g/100,1)} · У ${fmt(e.c*e.g/100,1)}</small></div>
+      <div class="item"><div class="n">${e.ing?`<button class="ghost" data-planinfo="${e.id}" style="padding:0;text-align:left;font:inherit;font-weight:600;color:inherit">${esc(e.name)} <span class="tag">состав и рецепт ›</span></button>`:esc(e.name)}${e.eaten&&dIds.has(e.eaten)?' <span class="tag">✓ съедено</span>':""}<small class="num">${e.ing&&e.portionG?fmt(e.g/e.portionG,1).replace(",0","")+" порц. · ":""}Б ${fmt(e.p*e.g/100,1)} · Ж ${fmt(e.f*e.g/100,1)} · У ${fmt(e.c*e.g/100,1)}</small></div>
       <input type="number" inputmode="decimal" value="${e.g}" aria-label="Граммы: ${esc(e.name)}" data-plang="${e.id}"><div class="k">${fmt(e.kcal*e.g/100)}</div>
       <button class="icon" data-plandel="${e.id}" aria-label="Убрать ${esc(e.name)}">✕</button></div>`).join("")}
       <button class="ghost" data-padd="${m}" style="margin-top:6px;padding-left:0">+ Добавить</button></div>`; }).join("");
@@ -1771,7 +1771,7 @@ function drawDraft(){
 function aiMenuEntry(m){
   const tot={g:0,kcal:0,p:0,f:0,c:0}; m.items.forEach(i=>{ const k=i.g/100; tot.g+=i.g; tot.kcal+=i.kcal*k; tot.p+=i.p*k; tot.f+=i.f*k; tot.c+=i.c*k; });
   const per=x=>tot.g?r1(x/tot.g*100):0;
-  return {id:uidGen(),meal:m.meal,name:m.name,g:r1(tot.g),kcal:per(tot.kcal),p:per(tot.p),f:per(tot.f),c:per(tot.c),ing:m.items.map(i=>({name:i.name,g:i.g,kcal:i.kcal,p:i.p,f:i.f,c:i.c})),totalG:r1(tot.g),portionG:r1(tot.g),ai:true};
+  return {id:uidGen(),meal:m.meal,name:m.name,g:r1(tot.g),kcal:per(tot.kcal),p:per(tot.p),f:per(tot.f),c:per(tot.c),ing:m.items.map(i=>({name:i.name,g:i.g,kcal:i.kcal,p:i.p,f:i.f,c:i.c})),totalG:r1(tot.g),portionG:r1(tot.g),ai:true,...(m.how?{how:m.how}:{})};
 }
 function openAiMenu(){
   const c=calc(); if(!c){ toast("Сначала заполни профиль — нужна норма калорий"); go("profile"); return; }
@@ -1802,7 +1802,32 @@ function openAiMenu(){
     }catch(e){ $("amGo").disabled=false; $("amMsg").textContent="Не получилось: "+errText(e); }
   };
 }
-document.addEventListener("click",e=>{ if(e.target.closest&&e.target.closest("#aiMenuBtn")) openAiMenu(); });
+document.addEventListener("click",e=>{ if(e.target.closest&&e.target.closest("#aiMenuBtn")) openAiMenu(); const pi=e.target.closest&&e.target.closest("[data-planinfo]"); if(pi) openPlanInfo(pi.dataset.planinfo); });
+/* состав и рецепт блюда из меню */
+function findPlanEntry(id){ const w=getWeek(menuWeek); for(const [d,a] of Object.entries(w.days)) { const e=(a||[]).find(x=>x.id===id); if(e) return {w,d,e}; } return null; }
+function openPlanInfo(id){
+  const f=findPlanEntry(id); if(!f) return; const e=f.e;
+  const k=e.totalG?e.g/e.totalG:1, ing=(e.ing||[]).map(i=>({...i,g:r1(i.g*k)}));
+  const how=e.how||(()=>{ const r=(typeof RECIPES!=="undefined"?RECIPES:[]).find(x=>norm(x.n)===norm(e.name)); return r&&r.s; })();
+  const multi=Object.values(f.w.days).flat().filter(x=>x&&norm(x.name)===norm(e.name)).length;
+  openSheet2(`<div class="row" style="justify-content:space-between;align-items:flex-start"><h2>${esc(e.name)}</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <div class="small muted">${e.meal} · порция ${fmt(e.g)} г</div>
+    <div class="card" style="padding:12px 14px"><div class="kv"><span>Калории</span><b>${fmt(e.kcal*e.g/100)} ккал</b><span>Белки / жиры / углеводы</span><b>${fmt(e.p*e.g/100)} / ${fmt(e.f*e.g/100)} / ${fmt(e.c*e.g/100)} г</b></div></div>
+    <h3 style="margin:4px 0 0">Ингредиенты на одну порцию</h3>
+    <div class="stack" style="gap:6px">${ing.map(i=>`<div class="row small" style="justify-content:space-between"><span>${esc(i.name)}</span><span class="num muted">${fmt(i.g)} г · ${fmt(i.kcal*i.g/100)} ккал</span></div>`).join("")}</div>
+    ${multi>1?`<p class="note" style="margin:0">Это блюдо в меню ${multi} ${plural(multi,"раз","раза","раз")}${/Обед|Ужин/.test(e.meal)?` — удобно приготовить сразу: возьми всё ×${multi}`:""}. В списке покупок это уже учтено.</p>`:""}
+    <h3 style="margin:4px 0 0">Как приготовить</h3>
+    <div id="piHow" class="small" style="white-space:pre-line">${how?esc(how):""}</div>
+    ${how?"":(typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai?`<button id="piAi">✨ Показать рецепт</button>`:`<p class="note" style="margin:0">Рецепт появится, когда подключён сервер с ИИ.</p>`)}
+    <p class="note" style="margin:0">Взвешивай ингредиенты перед готовкой — так калории в дневнике совпадут с тарелкой. Готовишь больше — записывай в дневник по весу своей порции.</p>`);
+  const b=$("piAi"); if(b) b.onclick=async()=>{
+    b.disabled=true; b.textContent="ИИ пишет рецепт…";
+    try{ const r=await sapi("ai/recipe",{name:e.name,ing:ing.map(i=>[i.name,i.g])}); const txt=(r.time?`⏱ ${r.time}\n`:"")+(r.steps||[]).map((x,i)=>`${i+1}. ${x}`).join("\n");
+      const w=getWeek(menuWeek); Object.values(w.days).forEach(a=>(a||[]).forEach(x=>{ if(norm(x.name)===norm(e.name)) x.how=txt; })); putWeek(menuWeek,w);
+      $("piHow").textContent=txt; b.remove(); }
+    catch(err){ b.disabled=false; b.textContent="✨ Показать рецепт"; toast(errText(err)); }
+  };
+}
 function shopItems(){
   const w=getWeek(menuWeek), from=(shopFromToday && mondayOf(today())===menuWeek)? today() : menuWeek, map=new Map(), cooks=new Map();
   const addItem=(name,g)=>{ let conv=false; const r=RAW_MAP[name]; if(r){ name=r[0]; g*=r[1]; conv=true; } const k=norm(name), cur=map.get(k)||{name,g:0,conv:false}; cur.g+=g; cur.conv=cur.conv||conv; map.set(k,cur); };

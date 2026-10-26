@@ -600,14 +600,15 @@ ${b.exclude ? `— НЕ использовать: ${String(b.exclude).slice(0, 3
 ${pantry.length ? `— В первую очередь используй продукты, которые есть дома: ${pantry.join(", ")}.` : ""}
 ${dishes.length ? `— Можно включать свои блюда пользователя: ${dishes.join(", ")}.` : ""}
 — Продукты с весом в граммах (крупы и макароны — варёные, мясо — готовое) и пищевой ценностью на 100 г. Короткие названия по-русски.
-Ответь ТОЛЬКО компактным JSON: {"days":[{"meals":[{"m":"Завтрак","n":"Овсянка с бананом","i":[["Овсянка на молоке",250,102,3.2,4.1,14.2],["Банан",100,96,1.5,0.5,21]]}]}]}
+— Для каждого блюда — "r": как приготовить, 1–3 коротких шага в одну строку (до 200 символов).
+Ответь ТОЛЬКО компактным JSON: {"days":[{"meals":[{"m":"Завтрак","n":"Овсянка с бананом","r":"Свари овсянку на молоке 5 минут, добавь нарезанный банан.","i":[["Овсянка на молоке",250,102,3.2,4.1,14.2],["Банан",100,96,1.5,0.5,21]]}]}]}
 где в "i" каждый продукт — [название, граммы, ккал, белки, жиры, углеводы] на 100 г.`;
     const j = await claudeJSON(env, user.id, [{ type: "text", text: prompt }], 4000);
     return (j.days || []).slice(0, cnt);
   };
   const parts = await Promise.all(chunks.map((c, k) => one(c, k).catch(e => { throw e; })));
   const toItem = x => Array.isArray(x) ? { name: String(x[0] || "").slice(0, 60), g: Math.max(1, Math.round(+x[1] || 100)), kcal: r1(x[2]), p: r1(x[3]), f: r1(x[4]), c: r1(x[5]) } : { name: String(x.name || "").slice(0, 60), g: Math.max(1, Math.round(+x.grams || 100)), kcal: r1(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c) };
-  const out = parts.flat().slice(0, days).map(d => ({ meals: (d.meals || []).map(m => ({ meal: meals.includes(m.m || m.meal) ? (m.m || m.meal) : meals[0], name: String(m.n || m.name || "").slice(0, 70), items: (m.i || m.items || []).map(toItem).filter(x => x.name) })).filter(m => m.name && m.items.length) }));
+  const out = parts.flat().slice(0, days).map(d => ({ meals: (d.meals || []).map(m => ({ meal: meals.includes(m.m || m.meal) ? (m.m || m.meal) : meals[0], name: String(m.n || m.name || "").slice(0, 70), how: String(m.r || m.how || "").slice(0, 400), items: (m.i || m.items || []).map(toItem).filter(x => x.name) })).filter(m => m.name && m.items.length) }));
   if (!out.length || !out.some(d => d.meals.length)) throw new Error("ИИ не смог составить меню — попробуй ещё раз");
   return { days: out };
 }
@@ -970,6 +971,13 @@ async function api(req, env, url, user, ctx) {
   }
   if (p === "logout") { if (user.session) await env.KV.delete(`sess:${user.session}`); return json({ ok: true }); }
   if (p === "ai/photo") return await aiPhoto(env, user, body);
+  if (p === "ai/recipe") {
+    try {
+      const ing = (body.ing || []).slice(0, 20).map(x => `${String(x[0]).slice(0, 60)} — ${Math.round(+x[1] || 0)} г`).join("\n");
+      const j = await claudeJSON(env, user.id, [{ type: "text", text: `Напиши простой рецепт блюда «${String(body.name || "").slice(0, 80)}» из этих ингредиентов (вес — на одну порцию, в готовом виде для круп и мяса):\n${ing}\nКоротко и понятно, 3–6 шагов, без лишних ингредиентов (можно соль, специи, вода). Ответь ТОЛЬКО JSON: {"time":"20 минут","steps":["..."]}` }], 1200);
+      return json({ time: String(j.time || "").slice(0, 40), steps: (j.steps || []).map(x => String(x).slice(0, 300)).slice(0, 8) });
+    } catch (e) { return json({ error: String(e.message || e) }, 502); }
+  }
   if (p === "ai/menu") { try { return json(await aiMenu(env, user, body)); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "off/search") return await offProxy(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(url.searchParams.get("q") || "")}&page_size=40&langs=ru,en&fields=${OFF_FIELDS}`, ctx);
   if (p.startsWith("off/product/")) return await offProxy(`${OFF}/api/v2/product/${encodeURIComponent(p.slice(12))}.json?fields=${OFF_FIELDS}`, ctx);
