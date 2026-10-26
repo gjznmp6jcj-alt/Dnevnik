@@ -267,14 +267,14 @@ function repairJSON(t) {   // частые огрехи модели: «умны
   }
   try { return JSON.parse(out); } catch (e) { return null; }
 }
-async function claudeJSON(env, uid, content, maxTokens = 4000, model) {
+async function claudeJSON(env, uid, content, maxTokens = 4000, model, schema) {
   if (!env.ANTHROPIC_API_KEY) throw new Error("на сервере нет ключа ИИ");
   const day = new Date().toISOString().slice(0, 10), ck = `ai:${uid}:${day}`;
   const used = +(await env.KV.get(ck) || 0);
   if (used >= AI_DAILY_LIMIT) throw new Error(`на сегодня лимит ${AI_DAILY_LIMIT} запросов к ИИ исчерпан`);
   // ответ через «инструмент» — тогда API само гарантирует корректный JSON
-  const TOOL = [{ name: "answer", description: "Верни результат строго в той структуре, что описана в задании.", input_schema: { type: "object", additionalProperties: true } }];
-  const call = async (model, extra, useTool = true) => {
+  const TOOL = schema ? [{ name: "answer", description: "Верни результат строго в этой структуре.", input_schema: schema }] : null;
+  const call = async (model, extra, useTool = !!TOOL) => {
     const body = { model, max_tokens: maxTokens, messages: [{ role: "user", content: extra ? content.concat([{ type: "text", text: extra }]) : content }] };
     if (useTool) { body.tools = TOOL; body.tool_choice = { type: "tool", name: "answer" }; }
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -297,11 +297,13 @@ async function claudeJSON(env, uid, content, maxTokens = 4000, model) {
   if (!r.ok) throw new Error((r.data.error && r.data.error.message) || ("ИИ ответил ошибкой " + r.status));
   await env.KV.put(ck, String(used + 1), { expirationTtl: 60 * 60 * 30 });
   let j = extract(r.data);
+  const why = d => { const t = (d.content || []).map(c => c.type === "text" ? c.text : c.type === "tool_use" ? JSON.stringify(c.input) : `[${c.type}]`).join(" "); return `${d.stop_reason || "?"}; ${t.replace(/\s+/g, " ").slice(0, 160)}`; };
+  let diag = why(r.data);
   if (!j) {   // ответ оборвался или пришёл не в том виде — одна повторная попытка умной моделью
     const r2 = await call(MODEL_FALLBACK, "Верни результат строго в описанной структуре, компактно.");
-    if (r2.ok) j = extract(r2.data);
+    if (r2.ok) { j = extract(r2.data); diag += " | " + why(r2.data); } else diag += " | ошибка " + r2.status;
   }
-  if (!j) throw new Error("ИИ ответил непонятно — попробуй ещё раз");
+  if (!j) throw new Error("ИИ ответил непонятно — попробуй ещё раз. Подробности для Claude: " + diag);
   return j;
 }
 
@@ -613,6 +615,7 @@ async function botCycle(env, uid, s) {
   await send(env, uid, `🌸 Отметила: первый день цикла — сегодня.\nСледующие примерно ${next} (цикл ~${avg} дн.).\n\nВ ближайшие дни вес может быть выше обычного из-за воды — это не жир, смотри на тренд за неделю.`, { reply_markup: openBtn(env) });
 }
 
+const MENU_SCHEMA = { type: "object", required: ["days"], properties: { days: { type: "array", items: { type: "object", required: ["meals"], properties: { meals: { type: "array", items: { type: "object", required: ["m", "n", "i"], properties: { m: { type: "string", description: "приём пищи" }, n: { type: "string", description: "название блюда" }, r: { type: "string", description: "как приготовить" }, i: { type: "array", description: "продукты: [название, граммы, ккал, белки, жиры, углеводы] на 100 г", items: { type: "array", items: {} } } } } } } } } } };
 const COOK_SENSE = "\nЗдравый смысл кухни: свежие огурцы, помидоры, листовой салат и зелень не жарят и не греют — их едят свежими; блюда — такие, как реально едят в России.";
 /* --- меню на неделю от ИИ --- */
 async function aiMenu(env, user, b) {
@@ -636,11 +639,15 @@ ${dishes.length ? `— Можно включать свои блюда поль�
 — Для каждого блюда — "r": как приготовить, 1–3 коротких шага в одну строку (до 200 символов).
 Ответь ТОЛЬКО компактным JSON: {"days":[{"meals":[{"m":"Завтрак","n":"Овсянка с бананом","r":"Свари овсянку на молоке 5 минут, добавь нарезанный банан.","i":[["Овсянка на молоке",250,102,3.2,4.1,14.2],["Банан",100,96,1.5,0.5,21]]}]}]}
 где в "i" каждый продукт — [название, граммы, ккал, белки, жиры, углеводы] на 100 г.`;
-    let j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000);
-    if (hasLatin(j) || !(j.days || []).length) j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000, MODEL_FALLBACK);
+    let j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000, null, MENU_SCHEMA);
+    if (hasLatin(j) || !(j.days || []).length) j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000, MODEL_FALLBACK, MENU_SCHEMA);
     return (j.days || []).slice(0, cnt);
   };
-  const parts = await Promise.all(chunks.map((c, k) => one(c, k).catch(e => { throw e; })));
+  const settled = await Promise.allSettled(chunks.map((c, k) => one(c, k)));
+  if (!settled.some(x => x.status === "fulfilled" && x.value.length)) throw new Error((settled.find(x => x.status === "rejected") || {}).reason?.message || "ИИ не смог составить меню — попробуй ещё раз");
+  // если какой-то кусок не удался — повторяем удачные дни, чтобы неделя была заполнена
+  const okDays = settled.filter(x => x.status === "fulfilled").flatMap(x => x.value);
+  const parts = settled.map((x, k) => x.status === "fulfilled" && x.value.length ? x.value : okDays.slice(0, chunks[k]));
   const toItem = x => Array.isArray(x) ? { name: String(x[0] || "").slice(0, 60), g: Math.max(1, Math.round(+x[1] || 100)), kcal: r1(x[2]), p: r1(x[3]), f: r1(x[4]), c: r1(x[5]) } : { name: String(x.name || "").slice(0, 60), g: Math.max(1, Math.round(+x.grams || 100)), kcal: r1(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c) };
   const out = parts.flat().slice(0, days).map(d => ({ meals: (d.meals || []).map(m => ({ meal: meals.includes(m.m || m.meal) ? (m.m || m.meal) : meals[0], name: String(m.n || m.name || "").slice(0, 70), how: String(m.r || m.how || "").slice(0, 400), items: (m.i || m.items || []).map(toItem).filter(x => x.name) })).filter(m => m.name && m.items.length) }));
   if (!out.length || !out.some(d => d.meals.length)) throw new Error("ИИ не смог составить меню — попробуй ещё раз");
