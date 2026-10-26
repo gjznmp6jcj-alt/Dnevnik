@@ -299,8 +299,8 @@ async function claudeJSON(env, uid, content, maxTokens = 4000, model, schema) {
   let j = extract(r.data);
   const why = d => { const t = (d.content || []).map(c => c.type === "text" ? c.text : c.type === "tool_use" ? JSON.stringify(c.input) : `[${c.type}]`).join(" "); return `${d.stop_reason || "?"}; ${t.replace(/\s+/g, " ").slice(0, 160)}`; };
   let diag = why(r.data);
-  if (!j) {   // ответ оборвался или пришёл не в том виде — одна повторная попытка умной моделью
-    const r2 = await call(MODEL_FALLBACK, "Верни результат строго в описанной структуре, компактно.");
+  if (!j) {   // ответ оборвался или пришёл не в том виде — одна повторная попытка той же моделью
+    const r2 = await call(model || env.AI_MODEL || MODEL_MAIN, "Верни результат строго в описанной структуре, компактно.");
     if (r2.ok) { j = extract(r2.data); diag += " | " + why(r2.data); } else diag += " | ошибка " + r2.status;
   }
   if (!j) throw new Error("ИИ ответил непонятно — попробуй ещё раз. Подробности для Claude: " + diag);
@@ -618,6 +618,15 @@ async function botCycle(env, uid, s) {
 
 const MENU_SCHEMA = { type: "object", required: ["days"], properties: { days: { type: "array", items: { type: "object", required: ["meals"], properties: { meals: { type: "array", items: { type: "object", required: ["m", "n", "i"], properties: { m: { type: "string", description: "приём пищи" }, n: { type: "string", description: "название блюда" }, r: { type: "string", description: "как приготовить" }, i: { type: "array", description: "продукты: [название, граммы, ккал, белки, жиры, углеводы] на 100 г", items: { type: "array", items: {} } } } } } } } } } };
 const COOK_SENSE = "\nЗдравый смысл кухни: свежие огурцы, помидоры, листовой салат и зелень не жарят и не греют — их едят свежими; блюда — такие, как реально едят в России.";
+const stripLatin = o => JSON.parse(JSON.stringify(o, (k, v) => typeof v === "string" ? v.replace(/\s*\(?\b[A-Za-z][A-Za-z-]{2,}\b\)?/g, "").replace(/\s{2,}/g, " ").trim() : v));
+const MENU_PER_DAY = 3, MENU_PER_DAY_OWNER = 10;
+async function menuQuota(env, uid, take) {
+  const day = new Date().toISOString().slice(0, 10), k = `mn:${uid}:${day}`, used = +(await env.KV.get(k) || 0);
+  const owner = (await env.KV.get("owner")) || ((await kget(env, "users", [])) || [])[0];
+  const lim = String(owner) === String(uid) ? MENU_PER_DAY_OWNER : MENU_PER_DAY;
+  if (!take) return used < lim ? null : `Меню можно составлять до ${lim} раз в день — попробуй завтра. Отдельное блюдо можно заменить вручную.`;
+  await env.KV.put(k, String(used + 1), { expirationTtl: 60 * 60 * 30 });
+}
 /* --- меню на неделю от ИИ --- */
 async function aiMenu(env, user, b) {
   const n = Math.round(+b.norm || 0); if (!(n >= 900 && n <= 5000)) throw new Error("Сначала заполни профиль — нужна норма калорий");
@@ -641,8 +650,10 @@ ${dishes.length ? `— Можно включить одно из своих бл
 Ответь ТОЛЬКО компактным JSON: {"days":[{"meals":[{"m":"Завтрак","n":"Овсянка с бананом","r":"Свари овсянку на молоке 5 минут, добавь нарезанный банан.","i":[["Овсянка на молоке",250,102,3.2,4.1,14.2],["Банан",100,96,1.5,0.5,21]]}]}]}
 где в "i" каждый продукт — [название, граммы, ккал, белки, жиры, углеводы] на 100 г.`;
     let j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000, null, MENU_SCHEMA);
-    if (hasLatin(j) || !(j.days || []).length) j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000, MODEL_FALLBACK, MENU_SCHEMA);
-    return (j.days || []).slice(0, cnt);
+    if (hasLatin(j) || !(j.days || []).length) {   // повтор той же недорогой моделью; если снова латиница — просто вычищаем её
+      try { const j2 = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY + "\nВНИМАНИЕ: ни одного английского слова." }], 4000, null, MENU_SCHEMA); if ((j2.days || []).length) j = j2; } catch (e) { if (!(j.days || []).length) throw e; }
+    }
+    return stripLatin((j.days || []).slice(0, cnt));
   };
   const settled = await Promise.allSettled(chunks.map((c, k) => one(c, k)));
   if (!settled.some(x => x.status === "fulfilled" && x.value.length)) throw new Error((settled.find(x => x.status === "rejected") || {}).reason?.message || "ИИ не смог составить меню — попробуй ещё раз");
@@ -653,6 +664,39 @@ ${dishes.length ? `— Можно включить одно из своих бл
   const out = parts.flat().slice(0, days).map(d => ({ meals: (d.meals || []).map(m => ({ meal: meals.includes(m.m || m.meal) ? (m.m || m.meal) : meals[0], name: String(m.n || m.name || "").slice(0, 70), how: String(m.r || m.how || "").slice(0, 400), items: (m.i || m.items || []).map(toItem).filter(x => x.name) })).filter(m => m.name && m.items.length) }));
   if (!out.length || !out.some(d => d.meals.length)) throw new Error("ИИ не смог составить меню — попробуй ещё раз");
   return { days: out };
+}
+
+/* --- общая база рецептов: один раз пишет ИИ, дальше берём из базы для любого числа порций и любого человека --- */
+const rnorm = t => String(t || "").toLowerCase().replace(/ё/g, "е").replace(/[^а-яa-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+async function aiRecipe(env, user, body) {
+  const name = String(body.name || "").slice(0, 80);
+  const ingL = (body.ing || []).slice(0, 20).map(x => [String(x[0]).slice(0, 60), Math.round(+x[1] || 0)]).filter(x => x[0]);
+  const N = Math.max(1, Math.min(10, Math.round(+body.portions || 1)));
+  const key = "rcp:" + (await sha(rnorm(name) + "|" + ingL.map(x => rnorm(x[0])).sort().join(","))).slice(0, 24);
+  let rc = body.fresh ? null : await kget(env, key); const hit = !!rc;
+  if (!rc) {
+    const list = ingL.map((x, i) => `${i + 1}. ${x[0]}`).join("\n");
+    const j = await claudeJSON(env, user.id, [{ type: "text", text: `Ты — опытный домашний повар. Напиши рецепт блюда «${name}». Ингредиенты (вес в списке — уже ГОТОВОГО продукта):
+${list}
+Рецепт должен подходить для любого числа порций, поэтому в шагах НЕ пиши граммы и количества — их посчитает приложение. Вместо этого в "take" укажи, во сколько раз больше или меньше нужно взять продукта при покупке/готовке относительно готового веса:
+— крупы и макароны указаны варёными: гречка и рис ~0.4, макароны ~0.42, булгур и киноа ~0.35, бобовые ~0.45 — "as": «сухой гречки» и т.п.;
+— мясо, птица, рыба указаны готовыми: ~1.35 — "as": «сырого куриного филе» и т.п.;
+— остальное (овощи, масло, яйца, молочное) берут как есть — их в "take" не включай.
+Правила готовки:
+— Свежие овощи и зелень (огурцы, помидоры, листовой салат, редис, перец для салата, зелень) НЕ жарь и не грей: нарежь и подай свежими.
+— Масло — для заправки салата или для жарки, по смыслу.
+— Шаги такие, как реально готовят дома: время, огонь или температура духовки. Если логично готовить заранее (крупа, мясо) — так и напиши.
+— 3–6 шагов, на «ты», коротко.${RU_ONLY}
+Ответь ТОЛЬКО JSON: {"time":"30 минут","take":[{"n":1,"k":0.4,"as":"сухой гречки"}],"steps":["..."]}` }], 1500, MODEL_FALLBACK);
+    rc = { time: String(j.time || "").slice(0, 40), steps: (j.steps || []).map(x => String(x).slice(0, 300)).slice(0, 8), take: (j.take || []).filter(t => t && +t.n >= 1 && +t.n <= ingL.length && +t.k > 0 && +t.k < 5).map(t => ({ n: rnorm(ingL[Math.round(+t.n) - 1][0]), k: +t.k, as: String(t.as || "").slice(0, 60) })), ing: ingL.map(x => x[0]) };
+    if (!rc.steps.length) throw new Error("ИИ не прислал шаги рецепта — попробуй ещё раз");
+    await kput(env, key, rc);
+  }
+  // сколько взять — для этого числа порций (вес в запросе уже на все порции)
+  const r5 = g => g >= 100 ? Math.round(g / 10) * 10 : Math.max(5, Math.round(g / 5) * 5);
+  const take = (rc.take || []).map(t => { const x = ingL.find(y => rnorm(y[0]) === t.n); return x && x[1] ? `${t.as || x[0]} — ${r5(x[1] * t.k)} г` : null; }).filter(Boolean);
+  const steps = (take.length ? [`Возьми: ${take.join(", ")}. Остальное — по списку выше.`] : []).concat(rc.steps);
+  return { time: rc.time, steps, cached: hit, N };
 }
 
 /* ---------- кнопки под сообщениями ---------- */
@@ -1014,22 +1058,9 @@ async function api(req, env, url, user, ctx) {
   if (p === "logout") { if (user.session) await env.KV.delete(`sess:${user.session}`); return json({ ok: true }); }
   if (p === "ai/photo") return await aiPhoto(env, user, body);
   if (p === "ai/recipe") {
-    try {
-      const ing = (body.ing || []).slice(0, 20).map(x => `${String(x[0]).slice(0, 60)} — ${Math.round(+x[1] || 0)} г`).join("\n");
-      const N = Math.max(1, Math.min(10, Math.round(+body.portions || 1)));
-      const j = await claudeJSON(env, user.id, [{ type: "text", text: `Ты — опытный домашний повар. Напиши рецепт блюда «${String(body.name || "").slice(0, 80)}» на ${N} ${N === 1 ? "порцию" : N < 5 ? "порции" : "порций"}${N > 1 ? ` (всего около ${Math.round((+body.portionG || 0) * N)} г готового блюда, потом разделить на ${N} частей по ~${Math.round(+body.portionG || 0)} г)` : ""}. Ингредиенты уже посчитаны на все ${N} ${N === 1 ? "порцию" : "порций"}:\n${ing}
-Правила:
-— Вес круп, макарон и бобовых указан в ГОТОВОМ виде. Напиши, сколько взять сухих (гречка и рис — примерно ×0,4, макароны — ×0,42, булгур и киноа — ×0,35) и как их сварить.
-— Мясо, птица и рыба указаны в готовом виде. Напиши, сколько взять сырого (примерно ×1,35) и как приготовить: время, огонь или температура духовки.
-— Свежие овощи и зелень (огурцы, помидоры, листовой салат, редис, перец для салата, зелень) НЕ жарь и не грей: нарежь и подай свежими — отдельно или салатом.
-— Масло — для заправки салата или для жарки, по смыслу.
-— Шаги такие, как реально готовят дома, без странных сочетаний. Если блюдо логично готовить заранее (крупа, мясо) — так и напиши.
-— 3–6 шагов, на «ты», коротко.${RU_ONLY}
-Ответь ТОЛЬКО JSON: {"time":"30 минут","steps":["..."]}` }], 1500, MODEL_FALLBACK);
-      return json({ time: String(j.time || "").slice(0, 40), steps: (j.steps || []).map(x => String(x).slice(0, 300)).slice(0, 8) });
-    } catch (e) { return json({ error: String(e.message || e) }, 502); }
+    try { return json(await aiRecipe(env, user, body)); } catch (e) { return json({ error: String(e.message || e) }, 502); }
   }
-  if (p === "ai/menu") { try { return json(await aiMenu(env, user, body)); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
+  if (p === "ai/menu") { try { const q = await menuQuota(env, user.id); if (q) return json({ error: q }, 429); const r = await aiMenu(env, user, body); await menuQuota(env, user.id, true); return json(r); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "off/search") return await offProxy(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(url.searchParams.get("q") || "")}&page_size=40&langs=ru,en&fields=${OFF_FIELDS}`, ctx);
   if (p.startsWith("off/product/")) return await offProxy(`${OFF}/api/v2/product/${encodeURIComponent(p.slice(12))}.json?fields=${OFF_FIELDS}`, ctx);
   if (p === "file") {

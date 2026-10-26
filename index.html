@@ -373,7 +373,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 39</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 40</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1868,8 +1868,8 @@ function openPlanInfo(id,portionsArg){
     <p class="note" style="margin:0">В дневник записывается твоя порция — ${fmt(e.g)} г. Если разделишь иначе, поправь граммы в дневнике.</p>`);
   $("piN").onclick=ev=>{ const b=ev.target.closest("[data-pin]"); if(b) openPlanInfo(id,+b.dataset.pin); };
   const b=$("piAi"); if(b) b.onclick=async()=>{
-    const was=b.textContent; b.disabled=true; b.textContent="ИИ пишет рецепт…";
-    try{ const r=await sapi("ai/recipe",{name:e.name,portions:N,portionG:Math.round(totG/N),ing:ing.map(i=>[i.name,i.g])}); if(!(r.steps||[]).length) throw new Error("ИИ не прислал шаги рецепта — попробуй ещё раз");
+    const was=b.textContent; b.disabled=true; b.textContent=how&&howN===N?"ИИ пишет рецепт заново…":"Ищу рецепт…";
+    try{ const r=await sapi("ai/recipe",{name:e.name,portions:N,portionG:Math.round(totG/N),ing:ing.map(i=>[i.name,i.g]),fresh:!!(how&&howN===N)}); if(!(r.steps||[]).length) throw new Error("ИИ не прислал шаги рецепта — попробуй ещё раз");
       const txt=(r.time?`⏱ ${r.time}\n`:"")+(r.steps||[]).map((x,i)=>`${i+1}. ${x}`).join("\n");
       const w=getWeek(menuWeek); Object.values(w.days).forEach(a=>(a||[]).forEach(x=>{ if(norm(x.name)===norm(e.name)){ x.how=txt; x.howN=N; } })); putWeek(menuWeek,w);
       openPlanInfo(id,N); }
