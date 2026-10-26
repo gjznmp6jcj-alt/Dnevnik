@@ -360,7 +360,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 27</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 28</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1376,6 +1376,46 @@ function loadZXing(){
   if(!zxingP) zxingP=new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"; s.onload=()=>window.ZXing?res(window.ZXing):rej(new Error("no zxing")); s.onerror=()=>{ zxingP=null; rej(new Error("load")); }; document.head.appendChild(s); });
   return zxingP;
 }
+/* распознаватель zxing-cpp (WebAssembly) — заметно точнее и быстрее */
+const ZW_URL="https://cdn.jsdelivr.net/npm/zxing-wasm@3.0.2/dist/iife/reader/index.js";
+const ZW_OPTS={formats:["EAN13","EAN8","UPCA","UPCE","Code128"],tryHarder:true,maxNumberOfSymbols:1};
+let zwP=null;
+function loadZW(){
+  if(window.ZXingWASM) return Promise.resolve(window.ZXingWASM);
+  if(!zwP) zwP=new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=ZW_URL; s.onload=()=>window.ZXingWASM?res(window.ZXingWASM):rej(new Error("no zxing-wasm")); s.onerror=()=>{ zwP=null; rej(new Error("load")); }; document.head.appendChild(s); });
+  return zwP;
+}
+const zwPick=r=>{ const v=(r||[]).find(x=>x&&x.text&&eanValid(String(x.text).replace(/\D/g,""))); return v?String(v.text).replace(/\D/g,""):null; };
+async function zwFromImage(img,file){
+  const Z=await loadZW();
+  const c=document.createElement("canvas"), ctx=c.getContext("2d",{willReadFrequently:true});
+  for(const max of [1600,1000,2400]){
+    const W=img.naturalWidth, H=img.naturalHeight, sc=Math.min(1,max/Math.max(W,H));
+    c.width=Math.round(W*sc); c.height=Math.round(H*sc); ctx.drawImage(img,0,0,c.width,c.height);
+    try{ const t=zwPick(await Z.readBarcodes(ctx.getImageData(0,0,c.width,c.height),ZW_OPTS)); if(t) return t; }catch(e){}
+  }
+  try{ return zwPick(await Z.readBarcodes(file,ZW_OPTS)); }catch(e){ return null; }
+}
+async function startLiveScan(video,onCode){
+  const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});
+  video.srcObject=stream; video.setAttribute("playsinline",""); video.muted=true; await video.play();
+  try{ const tr=stream.getVideoTracks()[0], cap=tr.getCapabilities&&tr.getCapabilities(); if(cap&&cap.focusMode&&cap.focusMode.includes("continuous")) await tr.applyConstraints({advanced:[{focusMode:"continuous"}]}); }catch(e){}
+  const Z=await loadZW();
+  let stop=false; const c=document.createElement("canvas"), ctx=c.getContext("2d",{willReadFrequently:true});
+  const off=()=>{ stop=true; try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){} };
+  const loop=async()=>{
+    if(stop) return; if(!video.isConnected){ off(); return; }
+    const W=video.videoWidth, H=video.videoHeight;
+    if(W&&H){
+      const sh=Math.round(H*0.6), sy=Math.round((H-sh)/2), sc=Math.min(1,1280/W);
+      c.width=Math.round(W*sc); c.height=Math.round(sh*sc); ctx.drawImage(video,0,sy,W,sh,0,0,c.width,c.height);
+      try{ const t=zwPick(await Z.readBarcodes(ctx.getImageData(0,0,c.width,c.height),ZW_OPTS)); if(t&&!stop){ off(); onCode(t); return; } }catch(e){}
+    }
+    setTimeout(loop,150);
+  };
+  loop();
+  return off;
+}
 function zxReader(Z){
   const h=new Map(); h.set(Z.DecodeHintType.TRY_HARDER,true);
   h.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13,Z.BarcodeFormat.EAN_8,Z.BarcodeFormat.UPC_A,Z.BarcodeFormat.UPC_E,Z.BarcodeFormat.CODE_128]);
@@ -1392,6 +1432,7 @@ async function decodeImageFile(file){
   const url=URL.createObjectURL(file);
   try{
     const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+    try{ const t=await zwFromImage(img,file); if(t) return t; }catch(e){}
     if("BarcodeDetector" in window){ try{ const det=new window.BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128"]}); const r=await det.detect(img); const v=r&&r.find(x=>eanValid(x.rawValue)); if(v) return v.rawValue; }catch(e){} }
     const Z=await loadZXing();
     const W=img.naturalWidth, H=img.naturalHeight;
@@ -1429,7 +1470,7 @@ async function decodeImageFile(file){
 function openScanner(onPick){
   if(IN_CLAUDE){ toast("Сканер работает в приложении в Telegram"); return; }
   openSheet2(`<div class="row" style="justify-content:space-between"><h2>Штрихкод</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
-    <div id="scLive" hidden><video id="scVideo" playsinline muted style="width:100%;border-radius:12px;background:#000;aspect-ratio:4/3;object-fit:cover"></video><p class="note" style="margin:6px 0 0">Наведи камеру на штрихкод — он распознается сам.</p></div>
+    <div id="scLive" hidden><div style="position:relative"><video id="scVideo" playsinline muted style="width:100%;border-radius:12px;background:#000;aspect-ratio:4/3;object-fit:cover;display:block"></video><div aria-hidden="true" style="position:absolute;left:8%;right:8%;top:20%;bottom:20%;border:2px solid rgba(255,255,255,.85);border-radius:10px;pointer-events:none"></div><div aria-hidden="true" style="position:absolute;left:10%;right:10%;top:50%;height:2px;background:#E5484D;pointer-events:none"></div></div><p class="note" style="margin:6px 0 0">Наведи камеру так, чтобы штрихкод был в рамке, — он распознается сам.</p></div>
     <label class="primary" id="scPhotoBtn" style="display:block;text-align:center;background:var(--accent);color:var(--accent-ink);border-radius:10px;padding:12px 14px;font-weight:700;cursor:pointer">Сфотографировать штрихкод<input type="file" accept="image/*" capture="environment" id="scFile" hidden></label>
     <p class="note" style="margin:0">Как снять, чтобы распозналось: поднеси телефон близко, чтобы штрихкод занял почти всю ширину кадра, держи ровно, без бликов и тени.</p>
     <div class="row"><input id="scCode" class="grow" style="flex:1 1 150px" inputmode="numeric" placeholder="или введи цифры под штрихкодом" aria-label="Цифры штрихкода"><button id="scFind">Найти</button></div>
@@ -1462,7 +1503,12 @@ function openScanner(onPick){
     e.target.value="";
   };
   // живая камера — где разрешена
+  const liveOn=()=>{ if($("scLive")){ $("scLive").hidden=false; $("scPhotoBtn").style.background="var(--surface2)"; $("scPhotoBtn").style.color="var(--fg)"; } };
   if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){
+    loadZW().then(()=>{ if(!$("scVideo")) return; liveOn(); return startLiveScan($("scVideo"),code=>{ $("scCode")&&($("scCode").value=code); handle(code); }).then(off=>{ scanStop=off; if(!$("scVideo")) off(); }); })
+      .catch(()=>{ if($("scLive")) $("scLive").hidden=true; oldLive(); });
+  }
+  function oldLive(){
     loadZXing().then(Z=>{
       if(!$("scVideo")) return;
       const reader=zxReader(Z); let done=false;
