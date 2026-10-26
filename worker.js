@@ -87,6 +87,7 @@ export default {
       if (url.pathname === "/h") return await healthIn(req, env, url);
       if (url.pathname === "/api/login/start") return cors(await loginStart(env), req);
       if (url.pathname === "/api/login/check") return cors(await loginCheck(env, url), req);
+      if (url.pathname === "/api/login/code") return cors(await loginByCode(env, url, req), req);
       if (url.pathname.startsWith("/api/")) {
         const user = await auth(req, env);
         if (!user) return cors(json({ error: "auth" }, 401), req);
@@ -186,6 +187,26 @@ async function loginCheck(env, url) {
   return json({ status: "ok", token, user: { id: r.uid, name: r.name } });
 }
 
+// запасной вход: 6-значный код из бота (если приложение «потеряло» ожидание входа)
+async function loginCode(env, uid, name) {
+  let code; do { code = String(100000 + Math.floor(Math.random() * 900000)); } while (await env.KV.get(`lc:${code}`));
+  await kput(env, `lc:${code}`, { uid, name }, 60 * 10);
+  return code;
+}
+async function loginByCode(env, url, req) {
+  const code = String(url.searchParams.get("code") || "").replace(/\D/g, "");
+  // простая защита от перебора кодов
+  const ip = (req && req.headers.get("cf-connecting-ip")) || "?";
+  const tries = +(await env.KV.get(`lct:${ip}`) || 0); if (tries >= 20) return json({ status: "wait", error: "Слишком много попыток — подожди 10 минут" });
+  await env.KV.put(`lct:${ip}`, String(tries + 1), { expirationTtl: 600 });
+  const r = code.length === 6 ? await kget(env, `lc:${code}`) : null;
+  if (!r) return json({ status: "bad" });
+  await env.KV.delete(`lc:${code}`);
+  const token = rid(32);
+  await kput(env, `sess:${token}`, { id: r.uid, name: r.name }, 60 * 60 * 24 * 90);
+  return json({ status: "ok", token, user: { id: r.uid, name: r.name } });
+}
+
 /* ---------------- Telegram Bot API ---------------- */
 async function tg(env, method, body) {
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -244,7 +265,8 @@ async function onTelegram(req, env, ctx) {
       if (!r) { await send(env, uid, "Ссылка для входа устарела. Нажми «Войти через Telegram» в приложении ещё раз."); return text("ok"); }
       await ensureUser(env, uid, m.from.first_name || "");
       await kput(env, `ln:${nonce}`, { st: "ok", uid, name }, 60 * 15);
-      await send(env, uid, "✅ Вход выполнен! Возвращайся в приложение «Дневник» — твои записи уже подтягиваются.");
+      const code = await loginCode(env, uid, name);
+      await send(env, uid, `✅ Вход выполнен! Возвращайся в приложение «Дневник» — записи подтянутся сами.\n\nЕсли приложение всё ещё ждёт — введи там код: <b>${code}</b> (действует 10 минут).`);
       return text("ok");
     }
     await ensureUser(env, uid, m.from.first_name || "");
@@ -254,6 +276,11 @@ async function onTelegram(req, env, ctx) {
     const users = await kget(env, "users", []), owner = (await env.KV.get("owner")) || users[0];
     if (uid !== String(owner)) { await send(env, uid, "Эта команда только для владельца бота."); return text("ok"); }
     await send(env, uid, await statsText(env, users));
+  } else if (cmd === "/login" || cmd === "/code") {
+    const name = [m.from.first_name, m.from.last_name].filter(Boolean).join(" ") || m.from.username || "Без имени";
+    await ensureUser(env, uid, m.from.first_name || "");
+    const code = await loginCode(env, uid, name);
+    await send(env, uid, `🔑 Код для входа в приложение: <b>${code}</b>\nВведи его в приложении на экране «Домой» → «Войти по коду». Действует 10 минут.`);
   } else if (cmd === "/help") {
     await send(env, uid, HELP_TEXT, { reply_markup: openBtn(env, "Открыть дневник 🌿") });
   } else if (cmd === "/today") {
@@ -860,15 +887,16 @@ async function botMessage(env, m) {
 const BOT_DESC = "Дневник похудения 🌿\n\n🍽 Считает калории и БЖУ: пишешь продукт и граммы — остальное посчитается само\n✍️ Можно писать прямо в чат: «на обед 150 г гречки и котлета» — или голосовым\n🔗 Пришли ссылку на рецепт — сохраню блюдо с калориями\n📷 Еда по фото, штрихкоду и этикетке\n📅 Меню на неделю и список покупок\n⚖️ Вес, прогресс и прогноз до цели\n❤️ Шаги и активность из «Здоровья» на iPhone\n👨‍👩‍👧 Общее меню для семьи\n🔔 Напоминания и итоги дня и недели\n\nНажми «Старт» — и начнём.";
 const BOT_SHORT = "Считаю калории по продукту и граммам, фото и штрихкоду. Меню на неделю, вес, шаги и напоминания 🌿";
 async function botDescribe(env) {
-  if (await env.KV.get("desc:v4")) return;
+  if (await env.KV.get("desc:v5")) return;
   await tg(env, "setMyDescription", { description: BOT_DESC });
   await tg(env, "setMyShortDescription", { short_description: BOT_SHORT });
   await tg(env, "setMyCommands", { commands: BOT_COMMANDS });
-  await env.KV.put("desc:v4", "1");
+  await env.KV.put("desc:v5", "1");
 }
 const BOT_COMMANDS = [
   { command: "start", description: "Начать" },
   { command: "help", description: "Что я умею и как записывать еду" },
+  { command: "login", description: "Код для входа в приложение на экране «Домой»" },
   { command: "today", description: "Итог сегодняшнего дня" },
   { command: "week", description: "Отчёт за неделю" },
   { command: "review", description: "Разбор недели от ИИ-нутрициолога" },
@@ -900,6 +928,7 @@ const HELP_TEXT = `<b>Как записывать еду прямо здесь, 
 /today — итог дня
 /week — отчёт за неделю
 /review — разбор недели от ИИ-нутрициолога (по воскресеньям приходит сам)
+/login — код для входа в приложение на экране «Домой»
 /stop — выключить напоминания
 /help — эта подсказка
 
