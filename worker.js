@@ -247,31 +247,61 @@ function pickJSON(t) {
 }
 const RU_ONLY = "\nПиши только по-русски: никаких английских слов и латиницы (кроме единиц вроде «г»).";
 const hasLatin = o => /[A-Za-z]{3,}/.test(JSON.stringify(o).replace(/"[a-z]{1,6}":/g, ""));
+function repairJSON(t) {   // частые огрехи модели: «умные» кавычки вокруг ключей, запятые перед скобкой, десятичная запятая в массивах
+  t = String(t || "").replace(/```(?:json)?/gi, "");
+  const a = t.indexOf("{"), b = t.lastIndexOf("}"); if (a < 0 || b <= a) return null;
+  let x = t.slice(a, b + 1).replace(/[“”]/g, '"').replace(/,\s*([}\]])/g, "$1");
+  try { return JSON.parse(x); } catch (e) {}
+  // кавычки внутри строк: закрывающая — только если дальше идёт , : } ]
+  let out = "", inS = false;
+  for (let i = 0; i < x.length; i++) {
+    const ch = x[i];
+    if (inS && ch === "\\") { out += ch + (x[i + 1] || ""); i++; continue; }
+    if (ch === '"') {
+      if (!inS) { inS = true; out += ch; continue; }
+      let k = i + 1; while (k < x.length && /\s/.test(x[k])) k++;
+      if (k >= x.length || ",:}]".includes(x[k])) { inS = false; out += ch; } else out += '\\"';
+      continue;
+    }
+    out += ch;
+  }
+  try { return JSON.parse(out); } catch (e) { return null; }
+}
 async function claudeJSON(env, uid, content, maxTokens = 4000, model) {
   if (!env.ANTHROPIC_API_KEY) throw new Error("на сервере нет ключа ИИ");
   const day = new Date().toISOString().slice(0, 10), ck = `ai:${uid}:${day}`;
   const used = +(await env.KV.get(ck) || 0);
   if (used >= AI_DAILY_LIMIT) throw new Error(`на сегодня лимит ${AI_DAILY_LIMIT} запросов к ИИ исчерпан`);
-  const call = async (model, extra) => {
+  // ответ через «инструмент» — тогда API само гарантирует корректный JSON
+  const TOOL = [{ name: "answer", description: "Верни результат строго в той структуре, что описана в задании.", input_schema: { type: "object", additionalProperties: true } }];
+  const call = async (model, extra, useTool = true) => {
+    const body = { model, max_tokens: maxTokens, messages: [{ role: "user", content: extra ? content.concat([{ type: "text", text: extra }]) : content }] };
+    if (useTool) { body.tools = TOOL; body.tool_choice = { type: "tool", name: "answer" }; }
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: extra ? content.concat([{ type: "text", text: extra }]) : content }] }),
+      body: JSON.stringify(body),
     });
     const raw = await r.text(); let data = {}; try { data = JSON.parse(raw); } catch (e) {}
     return { ok: r.ok, status: r.status, data };
   };
+  const extract = d => {
+    const tu = (d.content || []).find(c => c.type === "tool_use" && c.input && typeof c.input === "object");
+    if (tu && Object.keys(tu.input).length) return tu.input;
+    const t = (d.content || []).map(c => c.text || "").join("");
+    return pickJSON(t) || repairJSON(t);
+  };
   let r = await call(model || env.AI_MODEL || MODEL_MAIN);
+  if (!r.ok && r.status === 400) r = await call(model || env.AI_MODEL || MODEL_MAIN, null, false);   // если модель не умеет инструменты
   if (!r.ok && (r.status === 400 || r.status === 404)) r = await call(model ? MODEL_MAIN : MODEL_FALLBACK);
   if (!r.ok) throw new Error((r.data.error && r.data.error.message) || ("ИИ ответил ошибкой " + r.status));
   await env.KV.put(ck, String(used + 1), { expirationTtl: 60 * 60 * 30 });
-  const textOf = d => (d.content || []).map(c => c.text || "").join("");
-  let j = pickJSON(textOf(r.data));
-  if (!j) {   // ответ оборвался или пришёл не в том виде — одна повторная попытка, коротко
-    const r2 = await call(MODEL_FALLBACK, "Ответь ТОЛЬКО компактным JSON по схеме выше, без пояснений и без markdown.");
-    if (r2.ok) j = pickJSON(textOf(r2.data));
+  let j = extract(r.data);
+  if (!j) {   // ответ оборвался или пришёл не в том виде — одна повторная попытка умной моделью
+    const r2 = await call(MODEL_FALLBACK, "Верни результат строго в описанной структуре, компактно.");
+    if (r2.ok) j = extract(r2.data);
   }
-  if (!j) throw new Error("ИИ ответил непонятно — попробуй переформулировать или прислать ещё раз");
+  if (!j) throw new Error("ИИ ответил непонятно — попробуй ещё раз");
   return j;
 }
 
