@@ -360,7 +360,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 29</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 30</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -808,7 +808,7 @@ function addFood(){
   putDay(curDate,day);
   toast(`${picked.name}: +${fmt(picked.kcal*g/100)} ккал`);
   try{ TG && TG.isVersionAtLeast("6.1") && TG.HapticFeedback.notificationOccurred("success"); }catch(e){}
-  picked=null; $("fName").value=""; $("fGrams").value=""; delete $("fGrams").dataset.auto; updatePreview(); $("fName").focus();
+  picked=null; $("fName").value=""; $("fGrams").value=""; delete $("fGrams").dataset.auto; updatePreview(); try{ document.activeElement&&document.activeElement.blur(); }catch(e){}
 }
 
 /* ---- новый продукт (лист) ---- */
@@ -1632,7 +1632,7 @@ function mountPicker(root,opts){
   q.oninput=()=>{ sel=null; draw(); }; g.oninput=draw;
   q.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); if(!sel&&arr[0]) list.querySelector('button[data-k="0"]').click(); else if(sel) g.focus(); } };
   g.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); add.click(); } };
-  add.onclick=()=>{ const gv=num(g.value); if(!sel||!(gv>0)) return; opts.onAdd(sel,r1(gv)); sel=null; q.value=""; g.value=""; draw(); q.focus(); };
+  add.onclick=()=>{ const gv=num(g.value); if(!sel||!(gv>0)) return; opts.onAdd(sel,r1(gv)); sel=null; q.value=""; g.value=""; draw(); try{ document.activeElement&&document.activeElement.blur(); }catch(e){} };
   draw(); setTimeout(()=>q.focus(),60);
 }
 function planEntry(f,g,meal){
