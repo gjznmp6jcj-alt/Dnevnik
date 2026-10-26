@@ -364,7 +364,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 32</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 33</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1793,7 +1793,7 @@ function openAiMenu(){
     Store.set("aiMenuPrefs",{meals,exclude:ex,quick});
     const w0=getWeek(menuWeek), dates=[0,1,2,3,4,5,6].map(i=>addDays(menuWeek,i)).filter(d=>mode==="all"||!(w0.days[d]&&w0.days[d].length));
     if(!dates.length){ $("amMsg").textContent="Все дни уже заполнены — выбери «Заменить всю неделю»."; return; }
-    $("amGo").disabled=true; $("amMsg").textContent="ИИ составляет меню… это займёт 20–60 секунд.";
+    $("amGo").disabled=true; $("amMsg").textContent="ИИ составляет меню… обычно 15–40 секунд.";
     try{
       const r=await sapi("ai/menu",{norm:c.kcal,p:c.p,f:c.f,c:c.c,meals,exclude:ex,quick,pantry:usePk?pk:[],dishes:dishes().map(d=>d.name),days:dates.length});
       const w=getWeek(menuWeek); let n=0;
@@ -2136,9 +2136,9 @@ async function loadConfig(){
 const serverReady=()=>!!(SERVER && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
 async function sapi(path,body,method){
   const h={"content-type":"application/json"}; if(TG&&TG.initData) h["x-tg-init"]=TG.initData; else if(sessionToken) h["x-session"]=sessionToken;
-  const ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),path.startsWith("ai/")?90000:15000);
+  const ms=path==="ai/menu"?150000:path.startsWith("ai/")?90000:15000, ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),ms);
   let r; try{ r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:h,body:body?JSON.stringify(body):undefined,cache:"no-store",signal:ctl.signal}); }
-  catch(e){ clearTimeout(tm); throw new Error(e&&e.name==="AbortError"?"сервер не ответил за 15 секунд — похоже, его адрес не открывается в этой сети":errText(e)); }
+  catch(e){ clearTimeout(tm); throw new Error(e&&e.name==="AbortError"?(path.startsWith("ai/")?`ИИ не успел ответить за ${Math.round(ms/1000)} секунд — попробуй ещё раз`:"сервер не ответил за 15 секунд — похоже, его адрес не открывается в этой сети"):errText(e)); }
   clearTimeout(tm);
   let j=null; try{ j=await r.json(); }catch(e){}
   if(!r.ok){ const er=new Error((j&&j.error==="auth")?"нужно войти заново":((j&&j.error)||("сервер ответил "+r.status))); er.code=r.status; if(r.status===401&&!TG&&sessionToken) setTimeout(onSessionLost,0); throw er; }

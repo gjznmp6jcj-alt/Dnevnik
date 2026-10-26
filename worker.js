@@ -587,20 +587,27 @@ async function aiMenu(env, user, b) {
   const meals = +b.meals === 3 ? ["Завтрак", "Обед", "Ужин"] : ["Завтрак", "Обед", "Перекус", "Ужин"];
   const days = Math.max(1, Math.min(7, Math.round(+b.days || 7)));
   const pantry = (b.pantry || []).map(String).slice(0, 60), dishes = (b.dishes || []).map(String).slice(0, 30);
-  const prompt = `Ты — нутрициолог. Составь меню на ${days} ${days === 1 ? "день" : days < 5 ? "дня" : "дней"} для худеющего человека.
-— Норма в день: ${n} ккал (±5%), белки ~${Math.round(+b.p || n * 0.3 / 4)} г, жиры ~${Math.round(+b.f || n * 0.3 / 9)} г, углеводы ~${Math.round(+b.c || n * 0.4 / 4)} г.
-— Приёмы пищи: ${meals.join(", ")}.
-— Обычные продукты из российского супермаркета, недорого. ${b.quick ? "Только простые блюда: до 20–30 минут готовки." : ""}
-— Чтобы готовить реже, обед и ужин можно повторять 2 дня подряд (готовишь на два дня). Завтраки и перекусы — разнообразные, но простые.
+  const P = Math.round(+b.p || n * 0.3 / 4), F = Math.round(+b.f || n * 0.3 / 9), C = Math.round(+b.c || n * 0.4 / 4);
+  // по 2 дня параллельно — так втрое быстрее, и обед с ужином естественно повторяются 2 дня
+  const chunks = []; for (let d = 0; d < days; d += 2) chunks.push(Math.min(2, days - d));
+  const used = new Set();
+  const one = async (cnt, k) => {
+    const prompt = `Ты — нутрициолог. Составь меню на ${cnt === 1 ? "1 день" : "2 дня"} для худеющего человека (это часть недельного меню, кусок №${k + 1} — придумай блюда, отличные от других кусков: ${["курица и крупы", "рыба или индейка и овощи", "говядина или фарш и бобовые", "яйца, творог и запеканки"][k % 4]}).
+— Норма в день: ${n} ккал (±5%), белки ~${P} г, жиры ~${F} г, углеводы ~${C} г.
+— Приёмы пищи: ${meals.join(", ")}.${cnt === 2 ? " Обед и ужин в оба дня одинаковые (готовишь сразу на два дня), завтраки и перекусы разные." : ""}
+— Обычные недорогие продукты из российского супермаркета. ${b.quick ? "Только простые блюда: до 20–30 минут готовки." : ""}
 ${b.exclude ? `— НЕ использовать: ${String(b.exclude).slice(0, 300)}.` : ""}
-${pantry.length ? `— В первую очередь используй продукты, которые уже есть дома: ${pantry.join(", ")}.` : ""}
+${pantry.length ? `— В первую очередь используй продукты, которые есть дома: ${pantry.join(", ")}.` : ""}
 ${dishes.length ? `— Можно включать свои блюда пользователя: ${dishes.join(", ")}.` : ""}
-— Каждый приём пищи — одно блюдо или сочетание; укажи продукты с весом в граммах (крупы и макароны — в варёном виде, мясо — в готовом) и пищевую ценность на 100 г каждого продукта.
-— Короткие названия по-русски.
-Ответь ТОЛЬКО компактным JSON без пояснений:
-{"days":[{"meals":[{"meal":"Завтрак","name":"Овсянка с бананом","items":[{"name":"Овсянка на молоке","grams":250,"kcal":102,"p":3.2,"f":4.1,"c":14.2}]}]}]}`;
-  const j = await claudeJSON(env, user.id, [{ type: "text", text: prompt }], 12000);
-  const out = (j.days || []).slice(0, days).map(d => ({ meals: (d.meals || []).filter(m => m && m.name && (m.items || []).length).map(m => ({ meal: meals.includes(m.meal) ? m.meal : meals[0], name: String(m.name).slice(0, 70), items: m.items.filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 60), g: Math.max(1, Math.round(+x.grams || 100)), kcal: r1(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c) })) })) }));
+— Продукты с весом в граммах (крупы и макароны — варёные, мясо — готовое) и пищевой ценностью на 100 г. Короткие названия по-русски.
+Ответь ТОЛЬКО компактным JSON: {"days":[{"meals":[{"m":"Завтрак","n":"Овсянка с бананом","i":[["Овсянка на молоке",250,102,3.2,4.1,14.2],["Банан",100,96,1.5,0.5,21]]}]}]}
+где в "i" каждый продукт — [название, граммы, ккал, белки, жиры, углеводы] на 100 г.`;
+    const j = await claudeJSON(env, user.id, [{ type: "text", text: prompt }], 4000);
+    return (j.days || []).slice(0, cnt);
+  };
+  const parts = await Promise.all(chunks.map((c, k) => one(c, k).catch(e => { throw e; })));
+  const toItem = x => Array.isArray(x) ? { name: String(x[0] || "").slice(0, 60), g: Math.max(1, Math.round(+x[1] || 100)), kcal: r1(x[2]), p: r1(x[3]), f: r1(x[4]), c: r1(x[5]) } : { name: String(x.name || "").slice(0, 60), g: Math.max(1, Math.round(+x.grams || 100)), kcal: r1(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c) };
+  const out = parts.flat().slice(0, days).map(d => ({ meals: (d.meals || []).map(m => ({ meal: meals.includes(m.m || m.meal) ? (m.m || m.meal) : meals[0], name: String(m.n || m.name || "").slice(0, 70), items: (m.i || m.items || []).map(toItem).filter(x => x.name) })).filter(m => m.name && m.items.length) }));
   if (!out.length || !out.some(d => d.meals.length)) throw new Error("ИИ не смог составить меню — попробуй ещё раз");
   return { days: out };
 }
