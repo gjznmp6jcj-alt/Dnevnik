@@ -31,18 +31,18 @@
 :root{
   --bg:#F2F5F1; --surface:#FFFFFF; --surface2:#E8EEE7; --line:#D5DED4;
   --fg:#18231C; --muted:#5E6C62; --accent:#2D6A4F; --accent-ink:#FFFFFF; --accent-soft:#D7E9DD;
-  --warn:#D9773A; --warn-soft:#F8E3D3; --prot:#3F72AF; --fat:#D9A23A; --carb:#5C9E6E;
+  --warn:#D9773A; --warn-soft:#F8E3D3; --prot:#3F72AF; --fat:#D9A23A; --carb:#5C9E6E; --fib:#8A6BB8;
   --display:"Unbounded","Manrope",system-ui,sans-serif; --body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
   --r:14px;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#111813; --surface:#19221C; --surface2:#222D25; --line:#2E3B32;
   --fg:#E6EEE7; --muted:#9AA99E; --accent:#6FC195; --accent-ink:#0E1A13; --accent-soft:#1F3A2B;
-  --warn:#F0965C; --warn-soft:#3B2618; --prot:#7FA8DD; --fat:#E5BC63; --carb:#7DC08F; color-scheme:dark}}
+  --warn:#F0965C; --warn-soft:#3B2618; --prot:#7FA8DD; --fat:#E5BC63; --carb:#7DC08F; --fib:#B39AE0; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#111813; --surface:#19221C; --surface2:#222D25; --line:#2E3B32;
   --fg:#E6EEE7; --muted:#9AA99E; --accent:#6FC195; --accent-ink:#0E1A13; --accent-soft:#1F3A2B;
-  --warn:#F0965C; --warn-soft:#3B2618; --prot:#7FA8DD; --fat:#E5BC63; --carb:#7DC08F; color-scheme:dark}
+  --warn:#F0965C; --warn-soft:#3B2618; --prot:#7FA8DD; --fat:#E5BC63; --carb:#7DC08F; --fib:#B39AE0; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0}
 img{max-width:100%}
@@ -116,6 +116,14 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .kv{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:14px}
 .kv b{font-variant-numeric:tabular-nums;text-align:right}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.ig-bg{position:fixed;inset:0;z-index:200;background:rgba(10,20,14,.55);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(16px,env(safe-area-inset-top,0px)) 16px 0}
+.ig-card{background:var(--surface);border-radius:18px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.ig-card ol{margin:10px 0 0;padding-left:22px;display:grid;gap:10px}.ig-card li{line-height:1.35}
+.ig-ico{display:inline-flex;vertical-align:-5px;width:24px;height:24px;border-radius:6px;background:var(--surface2);align-items:center;justify-content:center;margin:0 2px}
+.ig-arrow{position:fixed;bottom:calc(10px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);font-size:44px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.4);animation:igb 1.1s ease-in-out infinite;pointer-events:none;z-index:201}
+@keyframes igb{0%,100%{transform:translate(-50%,0)}50%{transform:translate(-50%,10px)}}
+@media (prefers-reduced-motion:reduce){.ig-arrow{animation:none}}
+.macros.fibrow{grid-template-columns:1fr 2fr;align-items:end;margin-top:10px}.fibnote{line-height:1.3;padding-bottom:1px}
 .mac .t{display:flex;flex-direction:column;font-size:12px;color:var(--muted);font-weight:600}
 .mac .t b{color:var(--fg);font-variant-numeric:tabular-nums}
 .bar{height:6px;border-radius:4px;background:var(--surface2);overflow:hidden;margin-top:5px}
@@ -223,6 +231,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="dNext" aria-label="Следующий день">›</button>
     </div>
     <div id="loginCard" class="banner" hidden></div>
+    <div id="installNudge" class="card stack" hidden style="border-color:var(--accent);gap:10px"></div>
     <div id="localNote" class="banner" hidden></div>
     <div id="noProfile" class="banner" hidden>Сначала заполни <button class="ghost" data-go="profile">профиль</button> — без него приложение не знает твою норму калорий.</div>
     <div class="card" id="summary"></div>
@@ -364,7 +373,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 38</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 39</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -664,11 +673,32 @@ function calc(){
   const bmi=w/Math.pow(p.h/100,2);
   const bmiTxt=bmi<18.5?"Недостаток веса":bmi<25?"Норма":bmi<30?"Избыточный вес":"Ожирение";
   let goalDate=null; if(weeks!=null){ goalDate=addDays(today(),weeks*7); }
-  return {w,bmr,tdee,kcal,p:Math.round(kcal*.3/4),f:Math.round(kcal*.3/9),c:Math.round(kcal*.4/4),water:r1(w*0.03),weekly,limited,floor,rate,left,weeks,bmi,bmiTxt,goalDate};
+  return {w,bmr,tdee,kcal,p:Math.round(kcal*.3/4),f:Math.round(kcal*.3/9),c:Math.round(kcal*.4/4),water:r1(w*0.03),fb:p.sex==="Мужской"?30:25,weekly,limited,floor,rate,left,weeks,bmi,bmiTxt,goalDate};
+}
+/* ---------- клетчатка: оценка по названию, г на 100 г ---------- */
+const FIBER_TABLE=[
+ [/отруб/,40],[/чиа/,34],[/\bльн|льнян/,27],[/миндал/,12],[/фундук/,10],[/фисташ/,10],[/арахис/,8.5],[/грецк|орех/,7],[/кешью/,3.3],[/семечк|семена|подсолнеч.*сем/,8.6],
+ [/хлебц/,14],[/цельнозерн/,7],[/ржан|бородин/,5.8],[/хлеб|батон|багет|тост|булк/,2.7],[/лаваш|тортиль/,2],
+ [/гранол|мюсли/,7],[/(овсян|овес|овёс).*(хлоп|сух)|хлопья/,10],[/овсян|овся/,1.7],[/греч/,2.7],[/перлов/,3.8],[/булгур/,4.5],[/киноа/,2.8],[/рис.*бур|бурый рис/,1.8],[/пшен/,1.3],[/кус-кус|кускус/,1.4],[/рис/,0.4],
+ [/макарон|паст[аы]|спагетти|лапш/,1.8],
+ [/чечевиц/,7.9],[/\bнут/,7.6],[/фасол.*стручк|стручк/,3.4],[/фасол/,6.4],[/горох|горош/,5],[/хумус/,6],
+ [/авокадо/,6.7],[/малин/,6.5],[/ежевик/,5.3],[/смородин/,4.5],[/груш/,3.1],[/хурм/,3.6],[/киви/,3],[/финик/,8],[/кураг/,7.3],[/черносл/,7],[/изюм/,3.7],[/инжир/,3],
+ [/яблок/,2.4],[/банан/,2.6],[/апельсин/,2.4],[/мандарин/,1.8],[/грейпфрут/,1.6],[/клубник|земляник/,2],[/черник|голубик/,2.4],[/ягод/,3],[/вишн|черешн/,1.6],[/персик|нектарин|абрикос/,1.8],[/слив/,1.4],[/виноград/,0.9],[/дын/,0.9],[/арбуз/,0.4],[/ананас/,1.4],[/манго/,1.6],
+ [/брюссел/,3.8],[/брокколи/,2.6],[/цветн.*капуст/,2],[/капуст/,2.2],[/морков/,2.8],[/свекл|свёкл/,2.8],[/шпинат/,2.2],[/спарж/,2.1],[/баклажан/,3],[/кукуруз/,2.4],[/сельдер/,1.6],[/редис/,1.6],
+ [/зелень|укроп|петрушк|кинз|базилик/,2.5],[/руккол|айсберг|салат.?лист|листья салата/,1.3],[/перец|перц/,1.7],[/помидор|томат|черри/,1.2],[/огур/,0.5],[/кабач|цукин/,1],[/тыкв/,0.5],[/лук|чеснок/,1.8],[/гриб|шампиньон|вешенк/,1.1],
+ [/картоф|картош|пюре/,1.8],[/попкорн/,14],[/шоколад.*(горьк|тёмн|темн)|горьк.*шоколад/,10],[/шоколад/,3],[/батончик/,4],[/какао/,30],
+ [/винегрет/,3],[/борщ|щи\b|рагу|овощ/,2],[/салат/,1.5],[/суп/,1]
+];
+function estFiber(name){ const n=String(name||"").toLowerCase().replace(/ё/g,"е"); if(/сок\b|нектар\b|морс|кефир|йогурт|молок|сыр\b|творог|масло/.test(n)&&!/овощ|салат|с орех|с отруб/.test(n)) return 0; for(const [re,v] of FIBER_TABLE) if(re.test(n)) return v; return 0; }
+const fbOf = m => (m.fb!=null && !isNaN(+m.fb)) ? +m.fb : estFiber(m.name);
+const fbIng = ing => { let g=0,f=0; (ing||[]).forEach(i=>{ g+=+i.g||0; f+=fbOf(i)*(+i.g||0)/100; }); return g? Math.round(f/g*1000)/10 : 0; };
+function fiberLine(v,target){
+  const pct=target?Math.min(100,v/target*100):0;
+  return `<div class="mac fib"><div class="t"><span>Клетчатка</span><b>${fmt(v,v<10?1:0)}${target?" / "+target:""} г</b></div><div class="bar"><i style="width:${pct}%;background:var(--fib)"></i></div></div>`;
 }
 function dayTotals(d){
-  const day=getDay(d); const t={kcal:0,p:0,f:0,c:0,burn:0,min:0};
-  day.meals.forEach(m=>{ const k=m.g/100; t.kcal+=m.kcal*k; t.p+=m.p*k; t.f+=m.f*k; t.c+=m.c*k; });
+  const day=getDay(d); const t={kcal:0,p:0,f:0,c:0,fb:0,burn:0,min:0};
+  day.meals.forEach(m=>{ const k=m.g/100; t.kcal+=m.kcal*k; t.p+=m.p*k; t.f+=m.f*k; t.c+=m.c*k; t.fb+=fbOf(m)*k; });
   day.workouts.forEach(w=>{ t.burn+=w.kcal; t.min+=w.min; });
   t.woBurn=t.burn;
   if(day.health){ t.steps=day.health.steps||0; t.active=day.health.active||0; t.burn=Math.max(t.burn,t.active); } // активные калории из «Здоровья» уже включают тренировки
@@ -729,7 +759,8 @@ function renderDiary(){
     </div>
     <div class="macros">
       ${mac("Белки",t.p,c?.p,"var(--prot)")}${mac("Жиры",t.f,c?.f,"var(--fat)")}${mac("Углеводы",t.c,c?.c,"var(--carb)")}
-    </div>${healthDiaryBtn()}`;
+    </div>
+    <div class="macros fibrow">${fiberLine(t.fb,c?.fb)}<div class="small muted fibnote">${fiberHint(t,c)}</div></div>${healthDiaryBtn()}`;
   // приёмы пищи
   const day=getDay(curDate);
   const html = MEALS.map(m=>{
@@ -777,6 +808,13 @@ document.addEventListener("click",e=>{
     toast(`${meal}: добавлено ${src.length} ${plural(src.length,"продукт","продукта","продуктов")}`); renderDiary(); return; }
   if(e.target.closest&&e.target.closest("#mealSeg [data-meal]")) setTimeout(renderRepeat,0);
 });
+function fiberHint(t,c){
+  if(!t.kcal) return "Овощи, крупы, бобовые, ягоды и цельнозерновой хлеб";
+  if(!c) return "";
+  const left=c.fb-t.fb;
+  if(left<=0) return "Норма клетчатки есть 👍 Это сытость и спокойный кишечник";
+  return curDate===today()&&left>8 ? "Добавь овощей, ягод, хлебцы или бобовые" : `Ещё ~${fmt(Math.ceil(left))} г — например, овощи или фрукт`;
+}
 function mac(name,v,target,col){
   const pct=target?Math.min(100,v/target*100):0;
   return `<div class="mac"><div class="t"><span>${name}</span><b>${fmt(v)}${target?" / "+target:""} г</b></div><div class="bar"><i style="width:${pct}%;background:${col}"></i></div></div>`;
@@ -827,7 +865,7 @@ function pick(f){
 function addFood(){
   const g=grams(); if(!picked||!(g>0)) return;
   const day=clone(getDay(curDate));
-  day.meals.push({id:uidGen(),meal,name:picked.name,g:r1(g),kcal:picked.kcal,p:picked.p,f:picked.f,c:picked.c});
+  day.meals.push({id:uidGen(),meal,name:picked.name,g:r1(g),kcal:picked.kcal,p:picked.p,f:picked.f,c:picked.c,...(picked.fb!=null?{fb:picked.fb}:{})});
   putDay(curDate,day);
   toast(`${picked.name}: +${fmt(picked.kcal*g/100)} ккал`);
   try{ TG && TG.isVersionAtLeast("6.1") && TG.HapticFeedback.notificationOccurred("success"); }catch(e){}
@@ -1318,7 +1356,7 @@ function offToFood(p){
   const name=String(pick(p.product_name_ru)||pick(p.product_name)||"").trim(), brand=String(pick(p.brands)||"").split(",")[0].trim();
   const full = name ? (brand && !norm(name).includes(norm(brand)) ? `${name} (${brand})` : name) : (brand||"");
   const has = kcal!=null && kcal!=="" && !isNaN(+kcal);
-  return {name:full, kcal:has?r1(+kcal):null, p:r1(+n.proteins_100g||0), f:r1(+n.fat_100g||0), c:r1(+n.carbohydrates_100g||0), code:String(p.code||""), qty:p.quantity||""};
+  return {name:full, kcal:has?r1(+kcal):null, p:r1(+n.proteins_100g||0), f:r1(+n.fat_100g||0), c:r1(+n.carbohydrates_100g||0), ...(n.fiber_100g!=null&&n.fiber_100g!==""?{fb:r1(+n.fiber_100g)}:{}), code:String(p.code||""), qty:p.quantity||""};
 }
 async function offSearch(q){
   const ok=f=>f&&f.name&&f.kcal!=null;
@@ -1595,7 +1633,7 @@ function dishFood(d){
   const tot={g:0,kcal:0,p:0,f:0,c:0};
   (d.ing||[]).forEach(i=>{ const k=i.g/100; tot.g+=i.g; tot.kcal+=i.kcal*k; tot.p+=i.p*k; tot.f+=i.f*k; tot.c+=i.c*k; });
   const per=x=>tot.g? x/tot.g*100 : 0, portions=Math.max(1,d.portions||1);
-  return {name:d.name,kcal:per(tot.kcal),p:per(tot.p),f:per(tot.f),c:per(tot.c),dish:true,dishId:d.id,portions,portionG:tot.g/portions,totalG:tot.g,ing:d.ing,tot};
+  return {name:d.name,kcal:per(tot.kcal),p:per(tot.p),f:per(tot.f),c:per(tot.c),fb:fbIng(d.ing),dish:true,dishId:d.id,portions,portionG:tot.g/portions,totalG:tot.g,ing:d.ing,tot};
 }
 const weekKey = m => "w-"+m;
 const getWeek = m => { const x=Store.get(weekKey(m)); return {days:clone(x?.days||{}), bought:clone(x?.bought||{}), logged:clone(x?.logged||{})}; };
@@ -1894,7 +1932,7 @@ function renderShop(){
 function eatPlan(date, ids){
   const mk=mondayOf(date), w=getWeek(mk), day=clone(getDay(date)), have=new Set(day.meals.map(x=>x.id)); let n=0;
   (w.days[date]||[]).forEach(e=>{ if(ids && !ids.includes(e.id)) return; if(e.eaten && have.has(e.eaten)) return;
-    const id=uidGen(); day.meals.push({id,meal:e.meal,name:e.name,g:e.g,kcal:e.kcal,p:e.p,f:e.f,c:e.c}); e.eaten=id; n++; });
+    const id=uidGen(); day.meals.push({id,meal:e.meal,name:e.name,g:e.g,kcal:e.kcal,p:e.p,f:e.f,c:e.c,...(e.ing?{fb:fbIng(e.ing)}:e.fb!=null?{fb:e.fb}:{})}); e.eaten=id; n++; });
   if(n){ Store.set(dayKey(date),{date,meals:day.meals,workouts:day.workouts},true); putWeek(mk,w); }
   return n;
 }
@@ -2145,7 +2183,7 @@ function openReceive(obj){
     if(type==="d"){
       const g=gIn!=null?gIn:Math.round(dishFood(dish).portionG*mult); if(!(g>0)){ toast("Укажи, сколько съел(а)"); return; }
       const dd=saveDish?saveIt():dish, f=dishFood(dd), dayDoc=clone(getDay(day));
-      dayDoc.meals.push({id:uidGen(),meal,name:dd.name,g:r1(g),kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c)}); putDay(day,dayDoc);
+      dayDoc.meals.push({id:uidGen(),meal,name:dd.name,g:r1(g),kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c),fb:f.fb}); putDay(day,dayDoc);
       closeSheet2(); toast(`${dd.name}: +${fmt(f.kcal*g/100)} ккал`); curDate=day; go("diary");
     }
     if(type==="m"){
@@ -2460,7 +2498,7 @@ function openAiPhoto(file){
     if(b.dataset.aimeal){ meal=b.dataset.aimeal; drawResult(); }
     if(b.id==="aiRetry"){ hint=($("aiHint")&&$("aiHint").value.trim())||hint; ask(); }
     if(b.id==="aiAdd"){ const sel=items.filter(x=>x.on); if(!sel.length){ toast("Отметь хотя бы одно блюдо"); return; }
-      const d=clone(getDay(day)); sel.forEach(x=>d.meals.push({id:uidGen(),meal,name:x.name,g:r1(x.grams),kcal:r1(x.kcal),p:r1(x.p),f:r1(x.f),c:r1(x.c)})); putDay(day,d);
+      const d=clone(getDay(day)); sel.forEach(x=>d.meals.push({id:uidGen(),meal,name:x.name,g:r1(x.grams),kcal:r1(x.kcal),p:r1(x.p),f:r1(x.f),c:r1(x.c),...(x.fb!=null&&x.fb!==""?{fb:r1(+x.fb)}:{})})); putDay(day,d);
       closeSheet2(); toast(`${meal}: +${fmt(sel.reduce((s,x)=>s+x.kcal*x.grams/100,0))} ккал`); renderAll(); } });
   loadImageFile(file).then(({img,url})=>{ dataUrl=resizeToJpeg(img); URL.revokeObjectURL(url); ask(); }).catch(()=>body(`<div class="empty">Не получилось открыть фото.</div>`));
 }
@@ -2759,7 +2797,7 @@ const tipVisible=el=>{ if(!el) return false; if(el.closest("[hidden]")) return f
 function maybeTour(t){
   if(!tipsReady||tourOn) return;
   const s=tipsState(); if(s.off||s.seen[t]) return;
-  if(document.querySelector(".sheet-bg")) return;
+  if(document.querySelector(".sheet-bg,.ig-bg")) return;
   setTimeout(()=>{ if(tab===t&&!tourOn) startTour(t); },450);
 }
 function startTour(t){
@@ -3193,11 +3231,65 @@ function bind(){
   };
 }
 
+/* ================= УСТАНОВКА НА ЭКРАН «ДОМОЙ» ================= */
+const IS_IOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+let bipEvt=null; addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); bipEvt=e; try{ renderInstallNudge(); }catch(_){} });
+const SHARE_ICO=`<span class="ig-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8"/></svg></span>`;
+const ADD_ICO=`<span class="ig-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg></span>`;
+function installState(){ return Store.get("installPrompt")||{}; }
+function installSet(v){ Store.set("installPrompt",{...installState(),...v}); }
+function installWanted(){
+  if(IS_STANDALONE) return false;
+  const st=installState();
+  if(st.off||st.installed) return false;
+  if(st.snooze && st.snooze>today()) return false;
+  return true;
+}
+function renderInstallNudge(){
+  const el=$("installNudge"); if(!el) return;
+  if(!installWanted()||curDate!==today()){ el.hidden=true; return; }
+  el.hidden=false;
+  const where = TG ? "Откроется Safari — там покажу, куда нажать. Займёт 20 секунд." : IS_IOS ? "Две кнопки в Safari — покажу, какие." : "Иконка появится на главном экране.";
+  el.innerHTML=`<div class="row" style="gap:12px;align-items:flex-start;flex-wrap:nowrap"><div style="font-size:30px;line-height:1;flex:none;width:36px">📲</div><div class="stack" style="gap:4px;flex:1;min-width:0"><b>Поставь дневник на экран «Домой»</b><span class="small">Будет открываться с иконки, как обычное приложение — без поиска бота в Telegram. Записи общие с ботом. ${where}</span></div></div>
+    <button class="primary" id="instGo">Установить</button>
+    <div class="row" style="justify-content:space-between"><button class="ghost small" id="instLater" style="padding-left:0">Не сейчас</button><button class="ghost small" id="instOff">Больше не показывать</button></div>`;
+}
+function showInstallGuide(){
+  if(IS_STANDALONE) return;
+  let r=$("igRoot"); if(!r){ r=document.createElement("div"); r.id="igRoot"; document.body.appendChild(r); }
+  const ios=IS_IOS;
+  const steps = ios ? `<ol>
+      <li>Нажми ${SHARE_ICO} <b>«Поделиться»</b> на панели Safari ${"внизу"}. <span class="small muted">Если его не видно — нажми <b>•••</b> справа внизу, потом «Поделиться».</span></li>
+      <li>Пролистай вниз и выбери ${ADD_ICO} <b>«На экран „Домой“»</b>. <span class="small muted">Нет в списке — нажми «Ещё» / «Редактировать действия».</span></li>
+      <li>Нажми <b>«Добавить»</b> справа вверху.</li>
+      <li>Открой дневник <b>с новой иконки</b> и нажми «Войти через Telegram» — все записи подтянутся.</li></ol>`
+    : `<ol><li>Нажми <b>⋮</b> в меню браузера справа вверху.</li><li>Выбери <b>«Установить приложение»</b> или <b>«Добавить на главный экран»</b>.</li><li>Открой дневник с новой иконки и войди через Telegram.</li></ol>`;
+  r.innerHTML=`<div class="ig-bg" id="igBg" role="dialog" aria-label="Как установить"><div class="ig-card"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Установка за 20 секунд</h2><button class="icon" id="igX" aria-label="Закрыть">✕</button></div>${steps}
+    <div class="row" style="margin-top:14px;justify-content:space-between"><button class="ghost small" id="igDone" style="padding-left:0">Готово, установила</button><button class="ghost small" id="igOff">Больше не показывать</button></div></div>${ios?`<div class="ig-arrow" aria-hidden="true">⬇︎</div>`:""}</div>`;
+  const close=()=>{ r.innerHTML=""; renderAll(); try{ maybeTour(tab); }catch(_){} };
+  $("igX").onclick=close;
+  $("igBg").onclick=e=>{ if(e.target.id==="igBg") close(); };
+  $("igDone").onclick=()=>{ installSet({installed:today()}); close(); toast("Отлично! Теперь открывай дневник с иконки 📲"); };
+  $("igOff").onclick=()=>{ installSet({off:true}); close(); };
+}
+document.addEventListener("click",async e=>{
+  const b=e.target.closest&&e.target.closest("button"); if(!b) return;
+  if(b.id==="instGo"){
+    if(TG){ openExternal(APP_URL+"?install=1"); return; }
+    if(bipEvt){ bipEvt.prompt(); const ch=await bipEvt.userChoice.catch(()=>null); bipEvt=null; if(ch&&ch.outcome==="accepted"){ installSet({installed:today()}); renderAll(); } return; }
+    showInstallGuide();
+  } else if(b.id==="instLater"){ installSet({snooze:addDays(today(),3)}); renderAll(); toast("Напомню через пару дней"); }
+  else if(b.id==="instOff"){ installSet({off:true}); renderAll(); toast("Хорошо. Инструкция есть в Профиле"); }
+});
+(function hookInstall(){
+  const _rd=renderDiary; renderDiary=function(){ _rd(); try{ renderInstallNudge(); if(IS_STANDALONE&&!installState().installed&&Store.mode!=="loading") installSet({installed:today()}); }catch(e){} };
+})();
+
 function onReady(){
   setSyncMode();
   fillProfileForm();
   go(profile()?"diary":"profile");
-  if(/[?&]install=1/.test(location.search) && !TG && !IS_STANDALONE) go("profile");
+  if(/[?&]install=1/.test(location.search) && !TG && !IS_STANDALONE) setTimeout(showInstallGuide,400);
   hideSplash();
   setTimeout(()=>{ tipsReady=true; renderTipsCard(); maybeTour(tab); },1700);
   checkStartParam();

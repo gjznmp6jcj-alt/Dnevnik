@@ -325,7 +325,7 @@ async function addMeals(env, uid, date, meal, items) {
   const v = (cur && cur.v) || { date, meals: [], workouts: [] };
   v.meals = v.meals || []; v.workouts = v.workouts || [];
   const ids = [];
-  for (const it of items) { const id = uid8(); ids.push(id); v.meals.push({ id, meal, name: it.name, g: r1(it.g), kcal: r1(it.kcal), p: r1(it.p), f: r1(it.f), c: r1(it.c) }); }
+  for (const it of items) { const id = uid8(); ids.push(id); v.meals.push({ id, meal, name: it.name, g: r1(it.g), kcal: r1(it.kcal), p: r1(it.p), f: r1(it.f), c: r1(it.c), ...(it.fb != null && !isNaN(+it.fb) ? { fb: r1(+it.fb) } : {}) }); }
   await kput(env, k, { v, at: Date.now() });
   return { ids, day: v };
 }
@@ -408,14 +408,15 @@ const FOOD_TEXT_PROMPT = (dishes, cands) => `Ты — нутрициолог в 
 — Если сообщение — это рецепт или список продуктов для готовки (а не то, что человек съел), верни "type":"recipe" и пустой items.
 — Если сообщение не про еду — верни пустой items и в note коротко скажи, что ты понимаешь.
 ${cands.length ? `Справочник (на 100 г: ккал, Б, Ж, У):\n${cands.map(f => `${f[0]}: ${f[1]}, ${f[2]}, ${f[3]}, ${f[4]}`).join("\n")}\n` : ""}${dishes.length ? `Свои блюда пользователя (если он упоминает их — используй эти значения и порцию):\n${dishes.map(d => { const s = dishStats(d); return `«${d.name}»: порция ${s.portionG} г, на 100 г ${s.per100.kcal} ккал, Б ${s.per100.p}, Ж ${s.per100.f}, У ${s.per100.c}`; }).join("\n")}\n` : ""}Ответь ТОЛЬКО JSON без пояснений:
-{"type":"food","meal":null,"day_offset":0,"items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число}],"note":""}`;
+{"type":"food","meal":null,"day_offset":0,"items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число,"fb":число}],"note":""}
+fb — клетчатка, г на 100 г (0, если её нет: мясо, рыба, молочное, яйца).`;
 
 async function botFoodText(env, uid, s, textIn, viaVoice) {
   const dishes = (await userDishes(env, uid)).slice(0, 40);
   const cf = await kget(env, `u:${uid}:d:foods`), custom = (cf && cf.v && cf.v.items) || [];
   const j = await claudeJSON(env, uid, [{ type: "text", text: FOOD_TEXT_PROMPT(dishes, foodCandidates(textIn, custom)) + `\n\nСообщение пользователя: «${String(textIn).slice(0, 1500)}»` }]);
   if (j.type === "recipe") return botRecipe(env, uid, String(textIn), null);
-  const items = (j.items || []).filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 80), g: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0 }));
+  const items = (j.items || []).filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 80), g: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0, ...(x.fb != null && !isNaN(+x.fb) ? { fb: r1(+x.fb) } : {}) }));
   if (!items.length) {
     await send(env, uid, `${viaVoice ? `🎙 Услышала: «${esc(textIn)}»\n\n` : ""}${esc(j.note || "Не поняла, что записать.")}\n\nНапиши, что ты съела, например: «на обед 150 г гречки и котлета» — и я запишу в дневник. Можно голосовым или фото тарелки. А ссылку на рецепт я сохраню как блюдо.`, { reply_markup: openBtn(env) });
     return;
@@ -1093,8 +1094,8 @@ const AI_PROMPT = `Ты — нутрициолог. На фото еда. Опр
 Названия — по-русски, коротко и понятно («Гречка варёная», «Куриная грудка жареная», «Салат из огурцов и помидоров с маслом»).
 Если на фото упаковка с этикеткой — используй цифры с этикетки.
 Ответь ТОЛЬКО JSON без пояснений:
-{"items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число}],"note":"одна короткая фраза: что видно и насколько уверена оценка"}
-kcal, p, f, c — на 100 г. Если еды на фото нет — верни {"items":[],"note":"..."}. Если на фото меню кафе или ресторана (список блюд текстом) — верни {"items":[],"menu":true}`;
+{"items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число,"fb":число}],"note":"одна короткая фраза: что видно и насколько уверена оценка"}
+kcal, p, f, c, fb (клетчатка) — на 100 г. Если еды на фото нет — верни {"items":[],"note":"..."}. Если на фото меню кафе или ресторана (список блюд текстом) — верни {"items":[],"menu":true}`;
 
 async function aiPhoto(env, user, body) {
   if (!env.ANTHROPIC_API_KEY) return json({ error: "Сервер не настроен для ИИ: нет ключа ANTHROPIC_API_KEY" }, 400);
@@ -1121,7 +1122,7 @@ async function aiPhoto(env, user, body) {
   const m = t.match(/\{[\s\S]*\}/);
   let out = { items: [], note: "" };
   try { out = JSON.parse(m ? m[0] : t); } catch (e) { return json({ error: "Не удалось разобрать ответ ИИ", raw: t.slice(0, 500) }, 502); }
-  out.items = (out.items || []).filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 80), grams: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0 }));
+  out.items = (out.items || []).filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 80), grams: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0, ...(x.fb != null && !isNaN(+x.fb) ? { fb: +x.fb } : {}) }));
   return json({ ...out, used: used + 1, limit: AI_DAILY_LIMIT });
 }
 
