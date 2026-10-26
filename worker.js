@@ -544,16 +544,13 @@ async function saveDish(env, uid, dish) {
   await kput(env, k, { v: { items: items.concat([d]) }, at: Date.now() });
   return d;
 }
-async function botRecipe(env, uid, sourceText, sourceUrl) {
-  const j = await claudeJSON(env, uid, [{ type: "text", text: RECIPE_PROMPT + `\n\nРецепт${sourceUrl ? ` (${sourceUrl})` : ""}:\n${sourceText.slice(0, 14000)}` }], 2500);
+async function recipeParse(env, uid, sourceText, sourceUrl) {
+  const j = await claudeJSON(env, uid, [{ type: "text", text: RECIPE_PROMPT + RU_ONLY + `\n\nРецепт${sourceUrl ? ` (${sourceUrl})` : ""}:\n${sourceText.slice(0, 14000)}` }], 2500);
   const ing = (j.ing || []).filter(x => x && x.name && +x.g > 0).map(x => ({ name: String(x.name).slice(0, 60), g: Math.round(+x.g), kcal: r1(x.kcal), p: r1(x.p), f: r1(x.f), c: r1(x.c) }));
-  if (!ing.length) { await send(env, uid, `Не получилось разобрать рецепт. ${esc(j.note || "")}\nПопробуй прислать текст рецепта сообщением — с ингредиентами и количеством.`); return; }
-  const dish = await saveDish(env, uid, { id: uid8(), name: String(j.name || "Блюдо по рецепту").slice(0, 60), portions: Math.max(1, Math.round(+j.portions || 1)), ing, src: sourceUrl || undefined });
-  const st = dishStats(dish), per = st.tot.kcal / st.P;
-  await send(env, uid, `🍲 Сохранила блюдо <b>«${esc(dish.name)}»</b>\n${st.P} ${st.P === 1 ? "порция" : st.P < 5 ? "порции" : "порций"} по ~${fmt(st.portionG)} г — <b>${fmt(per)} ккал</b> на порцию\nБ ${fmt(st.tot.p / st.P)} · Ж ${fmt(st.tot.f / st.P)} · У ${fmt(st.tot.c / st.P)} г на порцию\n\nИнгредиенты: ${ing.map(i => `${esc(i.name)} ${fmt(i.g)} г`).join(", ")}\n\nБлюдо уже в «Меню» → «Блюда» — его можно добавить в план недели или в дневник. Если что-то посчиталось не так, поправь там.`,
-    { reply_markup: { inline_keyboard: [[{ text: "🍽 Записать 1 порцию", callback_data: `rp:${dish.id}` }], [{ text: "Открыть дневник", web_app: { url: env.APP_URL } }]] } });
+  if (!ing.length) return { error: `Не получилось разобрать рецепт. ${j.note || ""}`.trim() };
+  return { dish: { id: uid8(), name: String(j.name || "Блюдо по рецепту").slice(0, 60), portions: Math.max(1, Math.round(+j.portions || 1)), ing, ...(sourceUrl ? { src: sourceUrl } : {}) } };
 }
-async function botRecipeUrl(env, uid, link) {
+async function recipeSource(link) {
   let html = "";
   try {
     const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 12000);
@@ -570,15 +567,36 @@ async function botRecipeUrl(env, uid, link) {
       if (r.ok) { const tx = (await r.text()).slice(0, 60000); if (tx.length > 300) html = `<body>${tx.replace(/</g, " ")}</body>`; }
     } catch (e) {}
   }
-  if (!html) { await send(env, uid, "Не получилось открыть эту страницу — сайт не пускает. Скопируй текст рецепта (ингредиенты с количеством) и пришли сообщением — я сохраню блюдо."); return; }
+  if (!html) return { error: "Не получилось открыть эту страницу — сайт не пускает. Скопируй текст рецепта (ингредиенты с количеством) и вставь его вместо ссылки." };
   let src;
   if (ld) {
     const ingr = [].concat(ld.recipeIngredient || ld.ingredients || []).join("\n");
     src = `Название: ${ld.name || ""}\nПорций: ${[].concat(ld.recipeYield || "").join(" ")}\nИнгредиенты:\n${ingr}`;
   } else src = htmlText(html);
-  if (ld ? ![].concat(ld.recipeIngredient || ld.ingredients || []).length : src.length < 200) { await send(env, uid, "На странице не нашла рецепт. Пришли текст рецепта сообщением — я сохраню блюдо."); return; }
-  await botRecipe(env, uid, src, link);
+  if (ld ? ![].concat(ld.recipeIngredient || ld.ingredients || []).length : src.length < 200) return { error: "На странице не нашла рецепт. Скопируй текст рецепта и вставь его вместо ссылки." };
+  return { src };
 }
+async function recipeImport(env, uid, text) {
+  const t = String(text || "").trim().slice(0, 20000);
+  const m = t.match(/https?:\/\/[^\s<>"']+/i);
+  if (m && t.replace(m[0], "").trim().length < 80) { const r = await recipeSource(m[0]); if (r.error) return r; return recipeParse(env, uid, r.src, m[0]); }
+  if (t.length < 30) return { error: "Вставь ссылку на рецепт или текст рецепта с ингредиентами и количеством." };
+  return recipeParse(env, uid, t, null);
+}
+async function botRecipe(env, uid, sourceText, sourceUrl) {
+  const r = await recipeParse(env, uid, sourceText, sourceUrl);
+  if (r.error) { await send(env, uid, `${esc(r.error)}\nПопробуй прислать текст рецепта сообщением — с ингредиентами и количеством.`); return; }
+  const dish = await saveDish(env, uid, r.dish), ing = dish.ing;
+  const st = dishStats(dish), per = st.tot.kcal / st.P;
+  await send(env, uid, `🍲 Сохранила блюдо <b>«${esc(dish.name)}»</b>\n${st.P} ${st.P === 1 ? "порция" : st.P < 5 ? "порции" : "порций"} по ~${fmt(st.portionG)} г — <b>${fmt(per)} ккал</b> на порцию\nБ ${fmt(st.tot.p / st.P)} · Ж ${fmt(st.tot.f / st.P)} · У ${fmt(st.tot.c / st.P)} г на порцию\n\nИнгредиенты: ${ing.map(i => `${esc(i.name)} ${fmt(i.g)} г`).join(", ")}\n\nБлюдо уже в «Меню» → «Блюда» — его можно добавить в план недели или в дневник. Если что-то посчиталось не так, поправь там.`,
+    { reply_markup: { inline_keyboard: [[{ text: "🍽 Записать 1 порцию", callback_data: `rp:${dish.id}` }], [{ text: "Открыть дневник", web_app: { url: env.APP_URL } }]] } });
+}
+async function botRecipeUrl(env, uid, link) {
+  const r = await recipeSource(link);
+  if (r.error) { await send(env, uid, esc(r.error).replace("вставь его вместо ссылки", "пришли сообщением — я сохраню блюдо")); return; }
+  await botRecipe(env, uid, r.src, link);
+}
+
 
 /* ---------------- «Что съесть?», меню в кафе, разбор недели ---------------- */
 async function dayLeft(env, uid, s) {
@@ -720,7 +738,7 @@ async function aiMenu(env, user, b) {
   const chunks = []; for (let d = 0; d < days; d += 2) chunks.push(Math.min(2, days - d));
   const used = new Set();
   const one = async (cnt, k) => {
-    const prompt = `Ты — нутрициолог. Составь меню на ${cnt === 1 ? "1 день" : "2 дня"} для худеющего человека (это часть недельного меню, кусок №${k + 1} — придумай блюда, отличные от других кусков: ${["курица и крупы", "рыба или индейка и овощи", "говядина или фарш и бобовые", "яйца, творог и запеканки"][k % 4]}).
+    const prompt = `Ты — нутрициолог. Составь меню на ${cnt === 1 ? "1 день" : "2 дня"} для ${b.maint ? "человека, который поддерживает свой вес (не худеет)" : "худеющего человека"} (это часть недельного меню, кусок №${k + 1} — придумай блюда, отличные от других кусков: ${["курица и крупы", "рыба или индейка и овощи", "говядина или фарш и бобовые", "яйца, творог и запеканки"][k % 4]}).
 — Норма в день: ${n} ккал (±5%), белки ~${P} г, жиры ~${F} г, углеводы ~${C} г.
 — Приёмы пищи: ${meals.join(", ")}.${cnt === 2 ? " Обед и ужин в оба дня одинаковые (готовишь сразу на два дня), завтраки и перекусы разные." : ""}
 — Обычные недорогие продукты из российского супермаркета. ${b.quick ? "Только простые блюда: до 20–30 минут готовки." : ""}
@@ -1146,6 +1164,7 @@ async function api(req, env, url, user, ctx) {
   if (p === "ai/recipe") {
     try { return json(await aiRecipe(env, user, body)); } catch (e) { return json({ error: String(e.message || e) }, 502); }
   }
+  if (p === "ai/recipe-import") { try { return json(await recipeImport(env, user.id, body.text)); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "ai/assist") { try { return json(await aiAssist(env, user, body)); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "ai/menu") { try { const q = await menuQuota(env, user.id); if (q) return json({ error: q }, 429); const r = await aiMenu(env, user, body); await menuQuota(env, user.id, true); return json(r); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "off/search") return await offProxy(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(url.searchParams.get("q") || "")}&page_size=40&langs=ru,en&fields=${OFF_FIELDS}`, ctx);

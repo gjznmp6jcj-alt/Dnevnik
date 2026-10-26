@@ -122,6 +122,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .feat{display:grid;grid-template-columns:36px 1fr;gap:10px;padding:12px 0;border-top:1px solid var(--line,rgba(0,0,0,.08))}
 .feat .ic{width:36px;height:36px;border-radius:10px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:18px}
 .feat.done .ic{background:var(--accent-soft)}
+.feat.star{background:var(--accent-soft);border-radius:14px;padding:12px;margin:6px -4px;border-top:none}.feat.star b{font-size:17px}
+.star-tag{align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
 .feat-why{margin:0;padding-left:20px;display:grid;gap:6px}
 .feat-bar{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden}.feat-bar i{display:block;height:100%;background:var(--accent)}
 .asst-open{display:flex;align-items:center;gap:12px;width:100%;font:inherit;color:inherit;cursor:pointer;padding:12px 14px}
@@ -273,7 +275,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
         <button id="fLabel" aria-label="Сфотографировать этикетку">Этикетка</button>
       </div>
       <label class="labelbtn" id="aiWrap" hidden style="background:var(--accent-soft);color:var(--accent)">Фото еды — ИИ посчитает сам<input type="file" accept="image/*" capture="environment" id="aiFile" hidden></label>
-      <button class="ghost" id="pasteShare" style="align-self:flex-start;padding-left:0">Вставить, что прислали</button>
+      <button class="ghost" id="pasteShare" style="align-self:flex-start;padding-left:0">Вставить ссылку на рецепт или что прислали</button>
       <div class="note" id="botHint" hidden style="margin:0">✍️ Можно и в чате с ботом: напиши «на обед 150 г гречки», скажи голосом или пришли фото тарелки — запишется сюда. <button class="ghost" id="botChat" style="padding:0;font-size:inherit">Открыть чат</button></div>
       <div id="repeatWrap" hidden></div>
       <div id="dishWrap" hidden><div class="note" style="margin-bottom:6px">Мои блюда</div><div class="chips" id="dishChips"></div></div>
@@ -357,11 +359,11 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       </div>
       <div class="row">
         <label class="f">Вес на старте, кг<input type="number" step="0.1" id="prW0" inputmode="decimal"></label>
-        <label class="f">Желаемый вес, кг<input type="number" step="0.1" id="prGoal" inputmode="decimal"></label>
+        <label class="f"><span id="prGoalL">Желаемый вес, кг</span><input type="number" step="0.1" id="prGoal" inputmode="decimal"></label>
         <label class="f">Дата начала<input type="date" id="prStart"></label>
       </div>
       <label class="f">Уровень активности<select id="prAct"></select></label>
-      <label class="f">Темп похудения<select id="prPace"></select></label>
+      <label class="f">Цель и темп<select id="prPace"></select></label>
       <button class="primary" id="prSave">Сохранить профиль</button>
     </div>
     <button class="card asst-open" id="featOpenP"><span class="asst-ic" aria-hidden="true">🧭</span><span class="stack" style="gap:2px;text-align:left;flex:1"><b>Что умеет дневник</b><span class="small muted" id="featCountP">Все возможности с кнопкой «Попробовать»</span></span><span class="muted" aria-hidden="true">›</span></button>
@@ -397,7 +399,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 44</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 46</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -546,7 +548,11 @@ const BASE_FOODS = [
 
 const ACTIVITY = [["Минимальная (сидячая работа, без спорта)",1.2],["Низкая (тренировки 1–3 раза в неделю)",1.375],["Средняя (тренировки 3–5 раз в неделю)",1.55],["Высокая (тренировки 6–7 раз в неделю)",1.725],["Очень высокая (физическая работа + спорт)",1.9]];
 const PACE = [["Мягкий — 0,25 кг в неделю",0.25],["Умеренный — 0,5 кг в неделю",0.5],["Быстрый — 0,75 кг в неделю",0.75],["Максимальный — 1 кг в неделю",1]];
+const MAINTAIN="Поддержание — держать вес, не худеть";
+PACE.push([MAINTAIN,0]);
 const paceOf = p => PACE.find(a=>a[0]===p.pace)||PACE[2];
+const isMaint = p => !!p && paceOf(p)[1]===0;
+const MAINT_BAND=1.5;
 const WORKOUTS = [["Ходьба быстрым шагом",4.3],["Бег 8 км/ч",8.3],["Бег 10 км/ч",9.8],["Велосипед",6.8],["Плавание",6],["Силовая тренировка",5],["Функциональная / HIIT",8],["Танцы",5],["Йога / растяжка",2.5],["Пилатес",3],["Скакалка",11],["Эллипс",5],["Степпер / лестница",8.8],["Домашняя тренировка",4]];
 const MEALS = ["Завтрак","Обед","Перекус","Ужин"];
 const MONTHS = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
@@ -692,12 +698,13 @@ function calc(){
   const limited=raw<floor;
   const kcal=Math.round(Math.max(raw,floor)/10)*10;
   const weekly=Math.round(Math.max(0,tdee-kcal)*7/7700*100)/100;
-  const left=Math.max(0,w-p.goal);
+  const maint=isMaint(p);
+  const left=maint?0:Math.max(0,w-p.goal);
   const weeks=weekly>0?Math.ceil(left/weekly):null;
   const bmi=w/Math.pow(p.h/100,2);
   const bmiTxt=bmi<18.5?"Недостаток веса":bmi<25?"Норма":bmi<30?"Избыточный вес":"Ожирение";
   let goalDate=null; if(weeks!=null){ goalDate=addDays(today(),weeks*7); }
-  return {w,bmr,tdee,kcal,p:Math.round(kcal*.3/4),f:Math.round(kcal*.3/9),c:Math.round(kcal*.4/4),water:r1(w*0.03),fb:p.sex==="Мужской"?30:25,weekly,limited,floor,rate,left,weeks,bmi,bmiTxt,goalDate};
+  return {w,bmr,tdee,kcal,p:Math.round(kcal*.3/4),f:Math.round(kcal*.3/9),c:Math.round(kcal*.4/4),water:r1(w*0.03),fb:p.sex==="Мужской"?30:25,weekly,limited,floor,rate,left,weeks,bmi,bmiTxt,goalDate,maint,band:maint?[r1(p.goal-MAINT_BAND),r1(p.goal+MAINT_BAND)]:null};
 }
 /* ---------- клетчатка: оценка по названию, г на 100 г ---------- */
 const FIBER_TABLE=[
@@ -956,16 +963,25 @@ function renderProgress(){
     <div class="tiles">
       <div class="tile"><div class="v">${fmt(p.w0,1)}</div><div class="l">Старт, кг</div></div>
       <div class="tile"><div class="v">${fmt(cur,1)}</div><div class="l">Сейчас, кг</div></div>
-      <div class="tile"><div class="v ${lost>0?"pos":""}">${lost>0?"−":""}${fmt(Math.abs(lost),1)}</div><div class="l">Сброшено, кг</div></div>
+      ${c.maint?`<div class="tile"><div class="v">${cur<p.w0?"−":cur>p.w0?"+":""}${fmt(Math.abs(cur-p.w0),1)}</div><div class="l">С начала, кг</div></div>
+      <div class="tile"><div class="v">${fmt(p.goal,1)}</div><div class="l">Держу, кг</div></div>
+      <div class="tile"><div class="v">${fmt(c.kcal)}</div><div class="l">Норма, ккал</div></div>
+      <div class="tile"><div class="v ${cur>=c.band[0]&&cur<=c.band[1]?"pos":"neg"}">${cur>=c.band[0]&&cur<=c.band[1]?"В норме":cur>c.band[1]?"Выше":"Ниже"}</div><div class="l">Коридор ±${fmt(MAINT_BAND,1)} кг</div></div>`
+      :`<div class="tile"><div class="v ${lost>0?"pos":""}">${lost>0?"−":""}${fmt(Math.abs(lost),1)}</div><div class="l">Сброшено, кг</div></div>
       <div class="tile"><div class="v">${fmt(c.left,1)}</div><div class="l">До цели, кг</div></div>
       <div class="tile"><div class="v">${fmt(c.kcal)}</div><div class="l">Норма, ккал</div></div>
-      <div class="tile"><div class="v">${c.goalDate?shortD(c.goalDate):"–"}</div><div class="l">Цель примерно${c.weeks?` (${c.weeks} нед.)`:""}</div></div>
+      <div class="tile"><div class="v">${c.goalDate?shortD(c.goalDate):"–"}</div><div class="l">Цель примерно${c.weeks?` (${c.weeks} нед.)`:""}</div></div>`}
     </div>
-    <div class="card stack">
+    ${c.maint?(()=>{ const lo=c.band[0]-1.5, hi=c.band[1]+1.5, pos=Math.max(0,Math.min(1,(cur-lo)/(hi-lo))), a=(c.band[0]-lo)/(hi-lo), b=(c.band[1]-lo)/(hi-lo); return `<div class="card stack">
+      <div class="row" style="justify-content:space-between"><h2>Коридор веса</h2><b class="num">${fmt(cur,1)} кг</b></div>
+      <div class="path" style="position:relative;background:var(--surface2)"><i style="position:absolute;left:${a*100}%;width:${(b-a)*100}%;background:var(--accent-soft)"></i><span style="position:absolute;left:calc(${pos*100}% - 7px);top:-3px;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--surface)"></span></div>
+      <div class="row small muted num" style="justify-content:space-between"><span>${fmt(c.band[0],1)} кг</span><span>держу ${fmt(p.goal,1)} кг</span><span>${fmt(c.band[1],1)} кг</span></div>
+      <p class="note" style="margin:0">Колебания ±${fmt(MAINT_BAND,1)} кг — это нормально: вода, соль, цикл. Если вес неделю держится выше коридора — немного урежь порции или добавь шагов.</p>
+    </div>`; })():`<div class="card stack">
       <div class="row" style="justify-content:space-between"><h2>Путь к цели</h2><b class="num">${fmt(path*100)}%</b></div>
       <div class="path"><i style="width:${path*100}%"></i></div>
       <div class="row small muted num" style="justify-content:space-between"><span>${fmt(p.w0,1)} кг</span><span>цель ${fmt(p.goal,1)} кг</span></div>
-    </div>
+    </div>`}
     <div class="card stack chart"><div class="row" style="justify-content:space-between"><h2>Вес</h2>${waistN&&waist0?`<span class="small muted num">Талия: ${fmt(waist0)} → ${fmt(waistN)} см</span>`:""}</div>${weightChart(w,p)}</div>
     <div class="card stack chart"><h2>Калории за 30 дней</h2>${kcalChart(c.kcal)}
       <div class="legend"><span><i style="background:var(--accent)"></i>в норме</span><span><i style="background:var(--warn)"></i>выше нормы</span><span><i style="background:var(--muted);height:2px;vertical-align:3px"></i>норма</span></div></div>
@@ -997,7 +1013,7 @@ function weightChart(w,p){
   const lbls=[uniq[0],last].map((x,i)=>`<text x="${X(parseD(x.date).getTime())}" y="${H-6}" text-anchor="${i?"end":"start"}">${shortD(x.date)}</text>`).join("");
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="График веса">${grid}
     <path d="${area}" fill="var(--accent)" fill-opacity=".12"/>
-    <line x1="${pl}" x2="${W-pr}" y1="${Y(p.goal)}" y2="${Y(p.goal)}" stroke="var(--warn)" stroke-dasharray="5 4"/><text x="${W-pr}" y="${Y(p.goal)-5}" text-anchor="end" style="fill:var(--warn)">цель ${fmt(p.goal,1)}</text>
+    <line x1="${pl}" x2="${W-pr}" y1="${Y(p.goal)}" y2="${Y(p.goal)}" stroke="var(--warn)" stroke-dasharray="5 4"/><text x="${W-pr}" y="${Y(p.goal)-5}" text-anchor="end" style="fill:var(--warn)">${isMaint(p)?"держу":"цель"} ${fmt(p.goal,1)}</text>
     <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
     ${uniq.map(x=>`<circle cx="${X(parseD(x.date).getTime())}" cy="${Y(x.w)}" r="3" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>`).join("")}
     <circle cx="${X(t1)}" cy="${Y(last.w)}" r="5" fill="var(--accent)"/>${lbls}</svg>`;
@@ -1047,7 +1063,7 @@ function renderFoods(){
 const DEFAULT_PROFILE={sex:"Женский",age:30,h:168,w0:78,goal:65,act:ACTIVITY[2][0],pace:PACE[2][0],start:today()};
 function fillProfileForm(){
   const p=profile()||DEFAULT_PROFILE;
-  $("prSex").value=p.sex; $("prAge").value=p.age; $("prH").value=p.h; $("prW0").value=p.w0; $("prGoal").value=p.goal; $("prAct").value=p.act; $("prPace").value=paceOf(p)[0]; $("prStart").value=p.start||today();
+  $("prSex").value=p.sex; $("prAge").value=p.age; $("prH").value=p.h; $("prW0").value=p.w0; $("prGoal").value=p.goal; $("prAct").value=p.act; $("prPace").value=paceOf(p)[0]; $("prStart").value=p.start||today(); try{ $("prGoalL").textContent=isMaint(p)?"Вес, который держать, кг":"Желаемый вес, кг"; }catch(e){}
 }
 function renderNorm(){
   const c=calc(); const el=$("normCard");
@@ -1057,15 +1073,15 @@ function renderNorm(){
     <span>ИМТ</span><b>${fmt(c.bmi,1)} · ${c.bmiTxt}</b>
     <span>Базовый обмен</span><b>${fmt(c.bmr)} ккал</b>
     <span>Расход с активностью</span><b>${fmt(c.tdee)} ккал</b>
-    <span style="font-weight:800">Норма для похудения</span><b style="font-size:18px;color:var(--accent)">${fmt(c.kcal)} ккал</b>
+    <span style="font-weight:800">${c.maint?"Норма, чтобы держать вес":"Норма для похудения"}</span><b style="font-size:18px;color:var(--accent)">${fmt(c.kcal)} ккал</b>
     <span>Белки (30%)</span><b>${c.p} г</b>
     <span>Жиры (30%)</span><b>${c.f} г</b>
     <span>Углеводы (40%)</span><b>${c.c} г</b>
     <span>Вода</span><b>${fmt(c.water,1)} л</b>
-    <span>Ожидаемое снижение</span><b>${fmt(c.weekly,2)} кг/нед</b>
+    ${c.maint?`<span>Держим вес</span><b>${fmt(c.band[0],1)}–${fmt(c.band[1],1)} кг</b>`:`<span>Ожидаемое снижение</span><b>${fmt(c.weekly,2)} кг/нед</b>
     <span>Осталось сбросить</span><b>${fmt(c.left,1)} кг</b>
-    <span>Примерно до цели</span><b>${c.weeks!=null?c.weeks+" нед. · "+human(c.goalDate):"–"}</b>
-  </div>${c.limited?`<p class="banner small" style="margin:10px 0 0">Для темпа ${fmt(c.rate,2)} кг в неделю норма опустилась бы ниже ${c.floor} ккал. Поэтому стоит минимум ${c.floor} ккал, и реальный темп — около ${fmt(c.weekly,2)} кг в неделю. Ускорить можно тренировками: сожжённое на них добавляется к норме дня.</p>`:""}<p class="note" style="margin:10px 0 0">Норма пересчитывается по последнему взвешиванию. Безопасным обычно считают темп до 1 кг в неделю.</p>`;
+    <span>Примерно до цели</span><b>${c.weeks!=null?c.weeks+" нед. · "+human(c.goalDate):"–"}</b>`}
+  </div>${c.limited?`<p class="banner small" style="margin:10px 0 0">Для темпа ${fmt(c.rate,2)} кг в неделю норма опустилась бы ниже ${c.floor} ккал. Поэтому стоит минимум ${c.floor} ккал, и реальный темп — около ${fmt(c.weekly,2)} кг в неделю. Ускорить можно тренировками: сожжённое на них добавляется к норме дня.</p>`:""}<p class="note" style="margin:10px 0 0">Норма пересчитывается по последнему взвешиванию. ${c.maint?"Это примерно столько, сколько ты тратишь за день: вес будет держаться.":"Безопасным обычно считают темп до 1 кг в неделю."}</p>`;
 }
 
 const IN_CLAUDE = !!(window.claude && typeof window.claude.use==="function");
@@ -1698,9 +1714,9 @@ function mountPicker(root,opts){
     if(sel){ list.innerHTML=""; }
     else {
       const s=q.value.trim();
-      arr = s? findFoods(s,12,opts.dishes) : (opts.dishes? dishes().filter(d=>d.ing&&d.ing.length).map(dishFood):[]).concat(recentFoods().filter(f=>opts.dishes||!f.dish)).slice(0,12);
+      arr = s? findFoods(s,12,opts.dishes) : opts.noRecent? [] : (opts.dishes? dishes().filter(d=>d.ing&&d.ing.length).map(dishFood):[]).concat(recentFoods().filter(f=>opts.dishes||!f.dish)).slice(0,12);
       list.innerHTML = arr.map((f,i)=>`<button type="button" data-k="${i}"><span>${esc(f.name)}${f.dish?' <span class="tag">блюдо</span>':f.custom?' <span class="tag">моё</span>':""}</span><small class="num">${f.dish?fmt(f.kcal*f.portionG/100)+" ккал/порц.":fmt(f.kcal)+" ккал/100 г"}</small></button>`).join("")
-        || (s?`<div class="note" style="padding:10px">В справочнике не нашлось — попробуй «Найти в интернете» ниже.</div>`:"");
+        || (s?`<div class="note" style="padding:10px">В справочнике не нашлось — попробуй «Найти в интернете» ниже.</div>`:opts.noRecent?`<div class="note" style="padding:6px 2px">Начни вводить название продукта — например, «картофель».</div>`:"");
     }
     port.hidden=!(sel&&sel.dish);
     if(sel&&sel.dish) port.innerHTML=[0.5,1,1.5,2].map(n=>`<button type="button" class="chip" data-n="${n}">${String(n).replace(".",",")} порц.</button>`).join("");
@@ -1779,9 +1795,38 @@ function renderPlan(){
   </div>`;
   $("menuPlan").innerHTML=html;
 }
+/* ---------- рецепт по ссылке или тексту → блюдо (как в боте) ---------- */
+const aiOn=()=>typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai&&typeof serverReady==="function"&&serverReady();
+function recipeImportCard(){
+  return `<div class="card stack rcp-card" style="gap:10px">
+    <div class="row" style="gap:12px;align-items:flex-start;flex-wrap:nowrap"><div class="asst-ic" aria-hidden="true">🔗</div><div class="stack" style="gap:3px;flex:1;min-width:0"><b style="font-size:17px">Рецепт по ссылке — посчитаю сам</b><span class="small">Нашла рецепт на сайте, в блоге или в Instagram? Скопируй <b>ссылку</b> или сам <b>текст рецепта</b> и вставь сюда — калории, БЖУ и вес порции посчитаются автоматически.</span></div></div>
+    ${aiOn()?`<textarea id="rcpIn" rows="2" placeholder="https://… или текст рецепта с ингредиентами" aria-label="Ссылка или текст рецепта" style="font:inherit;font-size:15px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;resize:vertical"></textarea>
+    <div class="row" style="gap:8px"><button class="grow" id="rcpPaste">Вставить из буфера</button><button class="primary grow" id="rcpGo">Посчитать</button></div>
+    <div class="note" id="rcpMsg" style="margin:0"></div>`:`<p class="note" style="margin:0">Работает, когда выполнен вход через Telegram. А ещё можно просто отправить ссылку боту @${BOT_USERNAME} — блюдо появится здесь.</p>`}
+  </div>`;
+}
+async function runRecipeImport(text,msgEl,btn){
+  const say=t=>{ if(msgEl) msgEl.textContent=t; };
+  text=String(text||"").trim(); if(!text){ say("Вставь ссылку или текст рецепта."); return; }
+  const was=btn&&btn.textContent; if(btn){ btn.disabled=true; btn.textContent="Считаю…"; }
+  say(/https?:\/\//.test(text)?"Открываю страницу и считаю — 10–30 секунд…":"Считаю — 10–20 секунд…");
+  try{
+    const r=await sapi("ai/recipe-import",{text});
+    if(r.error||!r.dish) throw new Error(r.error||"Не получилось разобрать рецепт");
+    say(""); featMark("rcplink");
+    openDishEditor(null,r.dish);
+  }catch(e){ const m=errText(e); say(m+(/https?:\/\//.test(text)&&!/текст рецепта/.test(m)?" Если сайт не открывается — скопируй сам текст рецепта и вставь вместо ссылки.":"")); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent=was; } }
+}
+document.addEventListener("click",async e=>{
+  const b=e.target.closest&&e.target.closest("button"); if(!b) return;
+  if(b.id==="rcpGo") runRecipeImport($("rcpIn").value,$("rcpMsg"),b);
+  if(b.id==="rcpPaste"){ try{ const t=await navigator.clipboard.readText(); if(t){ $("rcpIn").value=t; runRecipeImport(t,$("rcpMsg"),$("rcpGo")); } else throw 0; }catch(err){ $("rcpIn").focus(); $("rcpMsg").textContent="Нажми в поле, подержи палец и выбери «Вставить»."; } }
+});
+
 function renderDishes(){
   const list=dishes();
-  $("menuDishes").innerHTML=`<button class="primary" id="dishNew">+ Новое блюдо</button>` + (list.length ? list.map(d=>{ const f=dishFood(d), P=f.portions;
+  $("menuDishes").innerHTML=recipeImportCard() + `<button id="dishNew">+ Собрать блюдо вручную</button>` + (list.length ? list.map(d=>{ const f=dishFood(d), P=f.portions;
     return `<div class="card stack" style="gap:8px">
       <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><h2 style="font-size:15px">${esc(d.name)}</h2><div class="small muted num">${P} ${P===1?"порция":P<5?"порции":"порций"} · ${fmt(f.portionG)} г порция</div></div><b class="num" style="white-space:nowrap">${fmt(f.tot.kcal/P)} ккал</b></div>
       <div class="small muted">${d.ing.map(i=>esc(i.name)+" "+fmt(i.g)+" г").join(" · ")}</div>
@@ -1790,21 +1835,23 @@ function renderDishes(){
     </div>`; }).join("")
   : `<div class="empty">Блюд пока нет. Собери блюдо из продуктов, например «Овсянка с бананом» из хлопьев, молока и банана. Потом добавляй его в меню и дневник одной строкой — калории посчитаются по порции.</div>`);
 }
-function openDishEditor(id){
+function openDishEditor(id,preset){
   const d=id? dishes().find(x=>x.id===id) : null;
-  draft = d? clone(d) : {id:uidGen(),name:"",portions:1,ing:[]};
+  draft = d? clone(d) : preset? {id:uidGen(),name:preset.name||"",portions:preset.portions||1,ing:clone(preset.ing||[]),...(preset.src?{src:preset.src}:{})} : {id:uidGen(),name:"",portions:1,ing:[]};
+  if(preset && dishes().some(x=>norm(x.name)===norm(draft.name))){ let n=2; while(dishes().some(x=>norm(x.name)===norm(draft.name+" ("+n+")"))) n++; draft.name+=" ("+n+")"; }
   dishDelConfirm=null;
-  openSheet(`<div class="row" style="justify-content:space-between"><h2>${d?"Изменить блюдо":"Новое блюдо"}</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
+  openSheet(`<div class="row" style="justify-content:space-between"><h2>${d?"Изменить блюдо":preset?"Проверь и сохрани":"Новое блюдо"}</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
     <div class="row"><label class="f" style="flex:3 1 180px">Название<input id="dName" value="${esc(draft.name)}" placeholder="Например, «Овсянка с бананом»"></label>
     <label class="f" style="flex:1 1 90px">Порций<input id="dPort" type="number" inputmode="numeric" min="1" value="${draft.portions}"></label></div>
     <div class="stack" style="gap:6px"><span class="small muted">Подходит на (для «Идей»):</span><div class="chips" id="dMeals">${MEALS.map(m=>`<button class="chip" data-dmeal="${m}" aria-pressed="${(draft.meals||[]).includes(m)}">${m}</button>`).join("")}</div></div>
     <div class="note" style="margin:0">Добавляй продукты на всё блюдо целиком: ищи в справочнике или сканируй штрихкод / этикетку, потом впиши граммы. Крупы и мясо удобнее вносить в сухом или сыром виде.</div>
+    ${preset?`<div class="banner small" style="margin:0">✨ Посчитала по рецепту${preset.src?` с <a href="${esc(preset.src)}" target="_blank" rel="noopener">сайта</a>`:""}. Проверь граммы и число порций — если что-то не так, поправь и нажми «Сохранить блюдо».</div>`:""}
     <div id="dIng"></div>
     <div id="dPk" class="stack" style="gap:10px"></div>
     <div id="dTot"></div>
     <div class="note" id="dMsg" style="color:var(--warn)"></div>
     <div class="row"><button class="grow" data-close>Отмена</button><button class="primary grow" id="dSave">Сохранить блюдо</button></div>`);
-  mountPicker($("dPk"),{dishes:false,addLabel:"Добавить ингредиент",onAdd:(f,g)=>{ draft.ing.push({name:f.name,g,kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c)}); drawDraft(); }});
+  mountPicker($("dPk"),{dishes:false,noRecent:true,addLabel:"Добавить ингредиент",onAdd:(f,g)=>{ draft.ing.push({name:f.name,g,kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c)}); drawDraft(); }});
   $("dPort").oninput=drawDraft;
   $("dMeals").onclick=e=>{ const b=e.target.closest("[data-dmeal]"); if(!b) return; const m=b.dataset.dmeal, cur=new Set(draft.meals||[]); cur.has(m)?cur.delete(m):cur.add(m); draft.meals=MEALS.filter(x=>cur.has(x)); b.setAttribute("aria-pressed",String(cur.has(m))); };
   $("dIng").addEventListener("change",e=>{ const i=e.target.dataset.ig; if(i==null) return; const v=num(e.target.value); if(v>0){ draft.ing[+i].g=r1(v); drawDraft(); } });
@@ -1857,7 +1904,7 @@ function openAiMenu(){
     if(!dates.length){ $("amMsg").textContent="Все дни уже заполнены — выбери «Заменить всю неделю»."; return; }
     $("amGo").disabled=true; $("amMsg").textContent="ИИ составляет меню… обычно 15–40 секунд.";
     try{
-      const r=await sapi("ai/menu",{norm:c.kcal,p:c.p,f:c.f,c:c.c,meals,exclude:ex,quick,pantry:usePk?pk:[],dishes:dishes().map(d=>d.name),days:dates.length});
+      const r=await sapi("ai/menu",{maint:!!c.maint,norm:c.kcal,p:c.p,f:c.f,c:c.c,meals,exclude:ex,quick,pantry:usePk?pk:[],dishes:dishes().map(d=>d.name),days:dates.length});
       const w=getWeek(menuWeek); let n=0;
       dates.forEach((d,i)=>{ const day=r.days[i]; if(!day) return; w.days[d]=day.meals.map(aiMenuEntry); n+=w.days[d].length; });
       putWeek(menuWeek,w); closeSheet2(); toast(`Готово: ${n} ${plural(n,"блюдо","блюда","блюд")} на ${dates.length} ${plural(dates.length,"день","дня","дней")}. Список покупок — во вкладке «Покупки»`); renderMenu();
@@ -2227,13 +2274,13 @@ function openReceive(obj){
 async function handleIncoming(code){ try{ openReceive(await unpackShare(code)); }catch(e){ toast("Не получилось прочитать то, что прислали"); } }
 function openPasteShare(){
   openSheet2(`<div class="row" style="justify-content:space-between"><h2>Вставить, что прислали</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
-    <p class="note" style="margin:0">Скопируй сообщение из семейного чата целиком (там есть «КОД:…») и вставь сюда.</p>
+    <p class="note" style="margin:0">Сюда можно вставить <b>ссылку на рецепт</b> или текст рецепта — посчитаю блюдо. Или сообщение из семейного чата целиком (там есть «КОД:…»).</p>
     <textarea id="pasteTa" rows="5" style="font:inherit;font-size:14px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px" placeholder="Вставь сообщение"></textarea>
     <div class="note" id="pasteMsg" style="color:var(--warn)"></div>
     <button class="primary" id="pasteGo">Открыть</button>`);
   setTimeout(()=>$("pasteTa").focus(),60);
   $("pasteGo").onclick=()=>{ const t=$("pasteTa").value; const m=t.match(/(?:КОД:|startapp=)\s*([zj][A-Za-z0-9_-]{10,})/)||t.trim().match(/^([zj][A-Za-z0-9_-]{10,})$/);
-    if(!m){ $("pasteMsg").textContent="Не нашла код в тексте. Скопируй сообщение целиком."; return; } handleIncoming(m[1]); };
+    if(!m){ if(aiOn()&&(/https?:\/\//.test(t)||t.trim().length>60)){ closeSheet2(); runRecipeImport(t,{set textContent(x){ if(x) toast(x); }},null); return; } $("pasteMsg").textContent="Не нашла ни кода, ни ссылки на рецепт. Скопируй сообщение целиком."; return; } handleIncoming(m[1]); };
 }
 function checkStartParam(){
   const sp=TG&&TG.initDataUnsafe&&TG.initDataUnsafe.start_param;
@@ -2255,11 +2302,12 @@ async function loadConfig(){
   try{ const o=localStorage.getItem("serverOverride"); if(o) SERVER=o.trim().replace(/\/+$/,""); }catch(e){}
 }
 const serverReady=()=>!!(SERVER && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
+const NET_HINT="нет связи с сервером. В России он открывается только через VPN: включи VPN для всего телефона (прокси внутри Telegram не подходит — он работает только для чатов) и попробуй ещё раз";
 async function sapi(path,body,method){
   const h={"content-type":"application/json"}; if(TG&&TG.initData) h["x-tg-init"]=TG.initData; else if(sessionToken) h["x-session"]=sessionToken;
   const ms=path==="ai/menu"?150000:path.startsWith("ai/")?90000:15000, ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),ms);
   let r; try{ r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:h,body:body?JSON.stringify(body):undefined,cache:"no-store",signal:ctl.signal}); }
-  catch(e){ clearTimeout(tm); throw new Error(e&&e.name==="AbortError"?(path.startsWith("ai/")?`ИИ не успел ответить за ${Math.round(ms/1000)} секунд — попробуй ещё раз`:"сервер не ответил за 15 секунд — похоже, его адрес не открывается в этой сети"):errText(e)); }
+  catch(e){ clearTimeout(tm); if(e&&e.name==="AbortError") throw new Error(path.startsWith("ai/")?`ИИ не успел ответить за ${Math.round(ms/1000)} секунд — попробуй ещё раз`:"сервер не ответил за 15 секунд — похоже, его адрес не открывается в этой сети"); throw new Error(NET_HINT); }
   clearTimeout(tm);
   let j=null; try{ j=await r.json(); }catch(e){}
   if(!r.ok){ const er=new Error((j&&j.error==="auth")?"нужно войти заново":((j&&j.error)||("сервер ответил "+r.status))); er.code=r.status; if(r.status===401&&!TG&&sessionToken) setTimeout(onSessionLost,0); throw er; }
@@ -2454,7 +2502,7 @@ function drawProgressCard(){
   const F='"Manrope",system-ui,sans-serif', D='"Unbounded","Manrope",system-ui,sans-serif';
   x.fillStyle="#9AA99E"; x.font=`600 40px ${F}`; x.fillText("Мой прогресс",80,140);
   x.fillStyle="#E6EEE7"; x.font=`700 150px ${D}`; x.fillText((lost>0?"−":"")+fmt(Math.abs(lost),1)+" кг",80,320);
-  x.fillStyle="#9AA99E"; x.font=`500 40px ${F}`; x.fillText(`${fmt(p.w0,1)} → ${fmt(c.w,1)} кг · цель ${fmt(p.goal,1)} кг`,80,390);
+  x.fillStyle="#9AA99E"; x.font=`500 40px ${F}`; x.fillText(`${fmt(p.w0,1)} → ${fmt(c.w,1)} кг · ${c.maint?"держу":"цель"} ${fmt(p.goal,1)} кг`,80,390);
   x.fillStyle="#2E3B32"; x.beginPath(); x.roundRect(80,440,W-160,36,18); x.fill();
   x.fillStyle="#6FC195"; x.beginPath(); x.roundRect(80,440,Math.max(36,(W-160)*path),36,18); x.fill();
   x.fillStyle="#E6EEE7"; x.font=`600 36px ${F}`; x.fillText(`${Math.round(path*100)}% пути`,80,530);
@@ -2807,7 +2855,7 @@ const TIPS={
   ],
   profile:[
     ["#prAge","Мои данные","Пол, возраст, рост, вес и цель — по ним считается твоя норма калорий."],
-    ["#prPace","Темп похудения","Чем быстрее темп, тем меньше норма. Ниже безопасного минимума она не опустится."],
+    ["#prPace","Цель и темп","Чем быстрее темп, тем меньше норма. Ниже безопасного минимума она не опустится. Дошла до цели — выбери «Поддержание»: норма станет такой, чтобы вес держался."],
     ["#normCard","Твоя норма","Норма калорий, белков, жиров и углеводов и прогноз, когда дойдёшь до цели."],
     ["#integrCards","Возможности","«Здоровье», выгрузка в Excel, напоминания бота и вход в аккаунт."],
     ["#coachCards .card","Кабинет тренера","Если ты тренер или нутрициолог — включи кабинет и пригласи клиентов. А если у тебя есть тренер, здесь видно, кому открыт доступ."],
@@ -3234,6 +3282,9 @@ function bind(){
   bindLabelScan("pLabel",{k:"pK",p:"pP",f:"pF",c:"pC"},"pLabelMsg");
   $("prAct").innerHTML=ACTIVITY.map(a=>`<option>${a[0]}</option>`).join("");
   $("prPace").innerHTML=PACE.map(a=>`<option>${a[0]}</option>`).join("");
+  const goalLbl=()=>{ const m=$("prPace").value===MAINTAIN; $("prGoalL").textContent=m?"Вес, который держать, кг":"Желаемый вес, кг"; if(m&&!$("prGoal").value) $("prGoal").value=$("prW0").value; };
+  $("prPace").addEventListener("change",()=>{ if($("prPace").value===MAINTAIN){ const w=currentWeight(); if(w) $("prGoal").value=fmt(w,1).replace(",","."); } goalLbl(); });
+  setTimeout(goalLbl,0);
   $("bkCopy").onclick=()=>{
     const txt="DNEVNIK1:"+JSON.stringify(Store.docs);
     const ta=$("bkText"); ta.value=txt;
@@ -3250,6 +3301,7 @@ function bind(){
   $("bkYes").onclick=()=>{ if(!bkData) return; Store.replaceAll(bkData); bkData=null; $("bkConfirm").hidden=true; $("bkText").value=""; fillProfileForm(); toast("Данные восстановлены"); };
   $("prSave").onclick=()=>{
     const p={sex:$("prSex").value,age:num($("prAge").value),h:num($("prH").value),w0:num($("prW0").value),goal:num($("prGoal").value),act:$("prAct").value,pace:$("prPace").value,start:$("prStart").value||today()};
+    if(isMaint(p)&&!p.goal) p.goal=p.w0;
     if(!p.age||!p.h||!p.w0||!p.goal){ toast("Заполни возраст, рост и вес"); return; }
     Store.set("profile",p); toast("Профиль сохранён");
   };
@@ -3290,22 +3342,22 @@ const hasMenu=()=>{ const w=getWeek(mondayOf(today())); return Object.values(w.d
 const FEATURES=[
  // группа, id, иконка, название, зачем, как, действие, «уже пользовалась»
  ["Как записать еду — 7 способов","search","🔎","Поиск продукта по названию","Почти 600 продуктов в справочнике и большая база из интернета — калории и БЖУ уже известны, считать ничего не нужно.","Дневник → поле «Продукт»: начни писать название (например, «творог») и выбери из списка. Справа впиши вес в граммах — сколько съела. Совет: можно сразу через пробел — «творог 5% 150» — это 150 грамм творога.",()=>{ go("diary"); flashEl("#fName"); setTimeout(()=>$("fName")&&$("fName").focus(),700); },()=>allDays().some(d=>getDay(d).meals.length)],
- ["Как записать еду — 7 способов","bot","💬","Написать или сказать боту","Не открывая приложение: просто напиши боту, что съела, или запиши голосовое. Бот сам найдёт продукты и посчитает калории.","Чат с ботом в Telegram: «на обед 150 г гречки и котлета» — или голосовым. Запись появится в Дневнике. Можно прислать и фото тарелки.",()=>{ go("diary"); flashEl("#botHint"); },null],
+ ["Как записать еду — 7 способов","bot","💬","Написать или сказать боту в Telegram","Самый быстрый способ: не открывая приложение, напиши боту, что съела, или запиши голосовое. Бот сам найдёт продукты и посчитает калории. Туда же можно прислать фото тарелки или ссылку на рецепт.","Открой Telegram → в поиске набери @"+BOT_USERNAME+" → нажми «Старт» (один раз). Дальше просто пиши: «на обед 150 г гречки и котлета» — запись появится в Дневнике. Или нажми «Попробовать» — чат откроется сам.",()=>{ closeSheet(); if(TG){ try{ TG.openTelegramLink("https://t.me/"+BOT_USERNAME); }catch(e){} } else openExternal("https://t.me/"+BOT_USERNAME); featMark("bot"); },null,null,true],
  ["Как записать еду — 7 способов","photo","📸","Фото тарелки","ИИ сам узнаёт блюда на фото, оценивает вес и калории. Удобно в гостях и в кафе, когда взвесить нечем.","Дневник → кнопка «Фото еды — ИИ посчитает сам» → сфотографируй тарелку → проверь граммы → «Добавить в дневник».",()=>{ go("diary"); flashEl("#aiWrap"); },null],
  ["Как записать еду — 7 способов","barcode","▥","Штрихкод","Продукт из магазина находится по штрихкоду — с точными цифрами производителя.","Дневник → кнопка «Штрихкод» → наведи камеру на штрихкод упаковки → впиши, сколько грамм съела.",()=>{ go("diary"); flashEl("#fScan"); },null],
  ["Как записать еду — 7 способов","label","🏷","Фото этикетки","Если продукта нет в базе — не нужно переписывать цифры вручную.","Дневник → кнопка «Этикетка» → сфотографируй таблицу «Пищевая ценность на 100 г» на упаковке. Цифры распознаются сами, продукт сохранится в твой справочник.",()=>{ go("diary"); flashEl("#fLabel"); },null],
  ["Как записать еду — 7 способов","repeat","↻","Повторить приём пищи","Завтракаешь одинаково? Не нужно вводить всё заново — одно касание, и весь прошлый завтрак записан.","Дневник → выбери приём пищи (например, «Завтрак»). Если сегодня он ещё пустой, под полем продукта появится кнопка «↻ Завтрак как вчера».",()=>{ go("diary"); flashEl("#repeatWrap,#mealSeg"); },null],
- ["Как записать еду — 7 способов","dishes","🍲","Свои блюда","Суп, запеканка, сырники по твоему рецепту — калории посчитаны из состава, дальше записываешь порцию в одно касание.","Меню → «Блюда» → «Новое блюдо» → впиши продукты и их вес. Или просто пришли боту ссылку на рецепт с сайта — он сохранит блюдо сам.",()=>goMenuSub("dishes"),()=>(typeof dishes==="function")&&dishes().length>0],
- ["Меню и покупки","aimenu","✨","Меню на неделю от ИИ","Меню под твою норму калорий и БЖУ: без продуктов, которые ты не ешь, и с тем, что уже есть дома. Обед и ужин повторяются 2 дня подряд — готовишь один раз на два дня.","Меню → «План» → «✨ Составить меню на неделю с ИИ» → отметь, что не ешь → «Составить». Занимает около минуты.",()=>{ goMenuSub("plan"); flashEl("#aiMenuBtn",500); },()=>hasMenu()],
+ ["Как записать еду — 7 способов","rcplink","🔗","Рецепт по ссылке — посчитается сам","Нашла рецепт на сайте или в блоге? Скопируй ссылку (или сам текст рецепта) и вставь — калории, БЖУ и вес порции посчитаются автоматически. Блюдо сохранится, дальше записываешь порцию в одно касание.","Меню → «Блюда» → вставь ссылку в поле «Рецепт по ссылке» → «Посчитать» → проверь и «Сохранить блюдо». Ссылку можно отправить и боту в Telegram.",()=>{ goMenuSub("dishes"); flashEl(".rcp-card",500); setTimeout(()=>{ const t=$("rcpIn"); if(t) t.focus(); },900); },()=>(typeof dishes==="function")&&dishes().length>0,null,true],
+ ["Меню и покупки","aimenu","✨","Меню на неделю от ИИ","Меню под твою норму калорий и БЖУ: без продуктов, которые ты не ешь, и с тем, что уже есть дома. Обед и ужин повторяются 2 дня подряд — готовишь один раз на два дня.","Меню → «План» → «Составить меню на неделю с ИИ» → отметь, что не ешь → «Составить». Занимает около минуты.",()=>{ goMenuSub("plan"); flashEl("#aiMenuBtn",500); },()=>hasMenu()],
  ["Меню и покупки","recipe","📖","Рецепт к любому блюду меню","Пошаговый рецепт и сколько чего взять: сухой крупы, сырого мяса — сразу на нужное число порций.","Меню → «План» → нажми на название блюда → выбери, на сколько порций готовишь → «Показать рецепт».",()=>{ goMenuSub("plan"); flashEl("[data-planinfo]",500); },null],
  ["Меню и покупки","shop","🛒","Список покупок сам","Собирается из меню: одинаковые продукты сложены, крупы и мясо пересчитаны в то, что покупают в магазине (сухая гречка, сырое филе).","Меню → «Покупки». В магазине отмечай купленное галочками. Список можно скопировать и отправить.",()=>goMenuSub("shop"),null],
  ["Меню и покупки","ideas","💡","Что приготовить из того, что дома","Не знаешь, что приготовить? Перечисли, что лежит в холодильнике, — приложение подберёт блюда и покажет, чего не хватает.","Меню → «Идеи» → впиши продукты, которые есть дома (например, «курица, гречка, кабачок»).",()=>goMenuSub("ideas"),null],
  ["Меню и покупки","family","👨‍👩‍👧","Семья: общее меню и покупки","Одно меню и один список покупок на всю семью — а дневник и норма калорий у каждого свои.","Меню → «Семья» → «Создать семью» → пригласи родных ссылкой.",()=>goMenuSub("family"),null],
- ["ИИ-помощник","assistant","🧠","Что съесть, чтобы уложиться в норму","Помощник смотрит, сколько калорий осталось и что есть дома, и предлагает 3 варианта. Понравившийся записывается одной кнопкой.","Дневник → «✨ Помощник» → «Что съесть сейчас?». Или спроси своими словами: «что съесть на ужин до 400 ккал?»",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); else flashEl("#botHint"); },300); },()=>typeof asstLog!=="undefined"&&asstLog.length>0],
- ["ИИ-помощник","cafe","🧾","Выбор в кафе по фото меню","Помощник прочитает меню ресторана и выберет 3 блюда, которые впишутся в твою норму, плюс подскажет, как сэкономить калории.","Дневник → «✨ Помощник» → «Меню кафе по фото» → сфотографируй страницу меню.",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
- ["ИИ-помощник","review","📊","Разбор недели","Как от нутрициолога: что получилось, на что обратить внимание и один выполнимый совет на следующую неделю.","Приходит сам в бот по воскресеньям, если за неделю было хотя бы 3 дня с записями. Или: «✨ Помощник» → «Разбор недели».",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
- ["Тело и здоровье","health","❤️","Шаги из «Здоровья» на iPhone","Шаги и активные калории с iPhone и часов прибавляются к норме — в активный день можно съесть больше.","Дневник → «❤️ Подключить „Здоровье“» → один раз установи быструю команду по инструкции. Потом обновляешь одной кнопкой.",()=>{ go("diary"); flashEl("#hcRun,#hcConnect"); },()=>!!(typeof hcGet==="function"&&hcGet())],
- ["Тело и здоровье","weight","⚖️","Вес, талия и дата цели","Видно, как идёт похудение, и примерную дату, когда дойдёшь до цели.","Вкладка «Вес» → впиши вес (раз в неделю, утром натощак) и, по желанию, талию → «Сохранить». График — во вкладке «Прогресс».",()=>{ go("weight"); flashEl("#wKg"); },()=>weights().length>0],
+ ["ИИ-помощник","assistant","🧠","Что съесть, чтобы уложиться в норму","Помощник смотрит, сколько калорий осталось и что есть дома, и предлагает 3 варианта. Понравившийся записывается одной кнопкой.","Дневник → «Помощник» → «Что съесть сейчас?». Или спроси своими словами: «что съесть на ужин до 400 ккал?»",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); else flashEl("#botHint"); },300); },()=>typeof asstLog!=="undefined"&&asstLog.length>0],
+ ["ИИ-помощник","cafe","🧾","Выбор в кафе по фото меню","Помощник прочитает меню ресторана и выберет 3 блюда, которые впишутся в твою норму, плюс подскажет, как сэкономить калории.","Дневник → «Помощник» → «Меню кафе по фото» → сфотографируй страницу меню.",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
+ ["ИИ-помощник","review","📊","Разбор недели","Как от нутрициолога: что получилось, на что обратить внимание и один выполнимый совет на следующую неделю.","Приходит сам в бот по воскресеньям, если за неделю было хотя бы 3 дня с записями. Или: Дневник → «Помощник» → «Разбор недели».",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
+ ["Тело и здоровье","health","❤️","Шаги из «Здоровья» на iPhone","Шаги и активные калории с iPhone и часов прибавляются к норме — в активный день можно съесть больше.","Дневник → кнопка «Подключить Здоровье» → один раз установи быструю команду по инструкции. Потом обновляешь одной кнопкой.",()=>{ go("diary"); flashEl("#hcRun,#hcConnect"); },()=>!!(typeof hcGet==="function"&&hcGet())],
+ ["Тело и здоровье","weight","⚖️","Вес, талия и дата цели","Видно, как идёт похудение, и примерную дату, когда дойдёшь до цели. Дошла до цели — переключись в Профиле на «Поддержание»: норма станет такой, чтобы вес держался, а на графике появится коридор ±1,5 кг.","Вкладка «Вес» → впиши вес (раз в неделю, утром натощак) и, по желанию, талию → «Сохранить». График — во вкладке «Прогресс».",()=>{ go("weight"); flashEl("#wKg"); },()=>weights().length>0],
  ["Тело и здоровье","cycle","🌸","Учёт цикла","Перед месячными вес часто растёт на 0,5–2 кг из-за воды. Приложение предупредит об этом заранее и отметит эти дни на графике — меньше поводов расстраиваться.","Вкладка «Вес» → «Цикл» → «Начались сегодня» в первый день месячных. Или напиши боту «начались».",()=>{ go("weight"); flashEl("#cycleCard"); },()=>cycleStarts().length>0,()=>isWoman()],
  ["Тело и здоровье","fiber","🥦","Клетчатка","Кроме белков, жиров и углеводов считается клетчатка — она даёт сытость. Норма — 25 г в день для женщин, 30 г для мужчин.","Ничего делать не нужно — смотри полоску «Клетчатка» под БЖУ в Дневнике.",()=>{ go("diary"); flashEl(".fibrow"); },null],
  ["Тело и здоровье","share","🏆","Карточка прогресса","Красивая картинка «минус N кг» для сторис или подруг — приятно и мотивирует.","Вкладка «Прогресс» → «Карточка прогресса — поделиться».",()=>{ go("progress"); flashEl("#progCard",500); },null],
@@ -3320,7 +3372,8 @@ function featCount(){ const l=featList(); return [l.filter(featDone).length,l.le
 const WHY=[
  "Записать еду можно 7 способами: найти по названию, сфотографировать тарелку, отсканировать штрихкод — или просто написать либо надиктовать боту в Telegram.",
  "ИИ составляет меню на неделю под твою норму и сам собирает список покупок.",
- "Рецепты к каждому блюду — сразу на нужное число порций.",
+ "Рецепт с любого сайта: вставь ссылку — калории и БЖУ посчитаются сами.",
+ "Рецепты к каждому блюду меню — сразу на нужное число порций.",
  "Помощник подскажет, что съесть, и выберет блюдо в кафе по фото меню.",
  "Шаги из «Здоровья» прибавляются к норме, а учёт цикла объясняет скачки веса.",
  "Семья, тренер и Telegram — всё в одном месте, на русском и без рекламы."
@@ -3328,16 +3381,17 @@ const WHY=[
 function openFeatures(){
   const [d,n]=featCount(), list=featList(); let g="";
   const body=list.map((f,i)=>{ const done=featDone(f); const head=f[0]!==g?`<h3 class="feat-g">${esc(f[0])}</h3>`:""; g=f[0];
-    return head+`<div class="feat ${done?"done":""}"><div class="ic" aria-hidden="true">${done?"✓":f[2]}</div><div class="stack" style="gap:4px"><b>${esc(f[3])}</b><span class="small">${esc(f[4])}</span><span class="small"><b>Как:</b> ${esc(f[5])}</span><button class="${done?"ghost":""} small" data-feattry="${f[1]}" style="align-self:flex-start;${done?"padding-left:0":""}">${done?"Открыть ещё раз":"Попробовать"}</button></div></div>`; }).join("");
+    return head+`<div class="feat ${done?"done":""} ${f[9]?"star":""}"><div class="ic" aria-hidden="true">${done?"✓":f[2]}</div><div class="stack" style="gap:4px">${f[9]?`<span class="star-tag">★ Главная фишка</span>`:""}<b>${esc(f[3])}</b><span class="small">${esc(f[4])}</span><span class="small"><b>Как:</b> ${esc(f[5])}</span><button class="${done?"ghost":""} small" data-feattry="${f[1]}" style="align-self:flex-start;${done?"padding-left:0":""}">${done?"Открыть ещё раз":"Попробовать"}</button></div></div>`; }).join("");
   openSheet(`<div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">🧭 Что умеет дневник</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
     <div class="card stack" style="background:var(--accent-soft);border:none;gap:8px"><b>Чем он лучше обычного счётчика калорий</b><ul class="feat-why small">${WHY.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
     <div class="stack" style="gap:6px"><div class="row small" style="justify-content:space-between"><span>Ты попробовала</span><b class="num">${d} из ${n}</b></div><div class="feat-bar"><i style="width:${Math.round(d/n*100)}%"></i></div></div>
     <div>${body}</div>`);
 }
 function pickFeatTip(){
-  const st=featSt(); const cand=featList().filter(f=>!featDone(f)&&!(st.skip&&st.skip[f[1]]));
+  const st=featSt(); const cand=featList().filter(f=>!featDone(f)&&!(st.skip&&st.skip[f[1]])).sort((a,b)=>(b[9]?1:0)-(a[9]?1:0));
   if(!cand.length) return null;
-  const day=Math.floor(parseD(today()).getTime()/864e5); return cand[day%Math.min(cand.length,4)];
+  const stars=cand.filter(f=>f[9]), pool=stars.length?stars:cand;
+  const day=Math.floor(parseD(today()).getTime()/864e5); return pool[day%Math.min(pool.length,4)];
 }
 function renderFeatTip(){
   const el=$("featTip"); if(!el) return; const st=featSt();
