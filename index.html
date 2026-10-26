@@ -116,6 +116,14 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .kv{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:14px}
 .kv b{font-variant-numeric:tabular-nums;text-align:right}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.flash{animation:flash 1.8s ease-out 1;border-radius:12px}
+@keyframes flash{0%,40%{box-shadow:0 0 0 4px var(--accent)}100%{box-shadow:0 0 0 0 transparent}}
+.feat-g{margin:6px 0 0;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#6b7a70)}
+.feat{display:grid;grid-template-columns:36px 1fr;gap:10px;padding:12px 0;border-top:1px solid var(--line,rgba(0,0,0,.08))}
+.feat .ic{width:36px;height:36px;border-radius:10px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:18px}
+.feat.done .ic{background:var(--accent-soft)}
+.feat-why{margin:0;padding-left:20px;display:grid;gap:6px}
+.feat-bar{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden}.feat-bar i{display:block;height:100%;background:var(--accent)}
 .asst-open{display:flex;align-items:center;gap:12px;width:100%;font:inherit;color:inherit;cursor:pointer;padding:12px 14px}
 .asst-ic{width:36px;height:36px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
 .asst-log{display:flex;flex-direction:column;gap:10px;min-height:120px;max-height:calc(90vh - 190px);overflow-y:auto;overscroll-behavior:contain;padding-right:2px}
@@ -244,6 +252,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
     <div id="noProfile" class="banner" hidden>Сначала заполни <button class="ghost" data-go="profile">профиль</button> — без него приложение не знает твою норму калорий.</div>
     <div class="card" id="summary"></div>
     <button class="card asst-open" id="assistOpen" hidden><span class="asst-ic" aria-hidden="true">✨</span><span class="stack" style="gap:2px;text-align:left;flex:1"><b>Помощник</b><span class="small muted">Что съесть сейчас, выбор в кафе по фото меню, разбор недели</span></span><span class="muted" aria-hidden="true">›</span></button>
+    <div id="featTip" class="card stack" hidden style="gap:10px"></div>
     <div class="card" id="coachNotes" hidden style="border-color:var(--accent)"></div>
     <div class="banner small" id="cycleNote" hidden style="background:#FBEAF0;color:#5A2236;border-color:#F2C6D4"></div>
 
@@ -355,6 +364,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <label class="f">Темп похудения<select id="prPace"></select></label>
       <button class="primary" id="prSave">Сохранить профиль</button>
     </div>
+    <button class="card asst-open" id="featOpenP"><span class="asst-ic" aria-hidden="true">🧭</span><span class="stack" style="gap:2px;text-align:left;flex:1"><b>Что умеет дневник</b><span class="small muted" id="featCountP">Все возможности с кнопкой «Попробовать»</span></span><span class="muted" aria-hidden="true">›</span></button>
     <div class="card" id="normCard"></div>
     <div class="card stack" id="installCard" hidden>
       <h2>Установить на телефон</h2>
@@ -382,7 +392,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 41</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 43</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -3239,6 +3249,88 @@ function bind(){
     Store.set("profile",p); toast("Профиль сохранён");
   };
 }
+
+/* ================= ВОЗМОЖНОСТИ: каталог, «фишка дня», отметки «уже пробовала» ================= */
+const featSt=()=>Store.get("feat")||{used:{},skip:{}};
+function featMark(id){ const st=featSt(); if(st.used&&st.used[id]) return; Store.set("feat",{...st,used:{...(st.used||{}),[id]:today()}}); }
+function flashEl(sel,delay=350){ setTimeout(()=>{ const el=document.querySelector(sel); if(!el){ return; } if(el.hidden) el.hidden=false; el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); setTimeout(()=>el.classList.remove("flash"),2000); },delay); }
+const goMenuSub=sub=>{ go("menu"); setTimeout(()=>{ const b=document.querySelector(`#menuSeg [data-msub="${sub}"]`); if(b) b.click(); },60); };
+const hasMenu=()=>{ const w=getWeek(mondayOf(today())); return Object.values(w.days).some(a=>(a||[]).length); };
+const FEATURES=[
+ // группа, id, иконка, название, зачем, как, действие, «уже пользовалась»
+ ["Как записать еду — 7 способов","search","🔎","Поиск продукта по названию","Почти 600 продуктов в справочнике и большая база из интернета — калории и БЖУ уже известны, считать ничего не нужно.","Дневник → поле «Продукт»: начни писать название (например, «творог») и выбери из списка. Справа впиши вес в граммах — сколько съела. Совет: можно сразу через пробел — «творог 5% 150» — это 150 грамм творога.",()=>{ go("diary"); flashEl("#fName"); setTimeout(()=>$("fName")&&$("fName").focus(),700); },()=>allDays().some(d=>getDay(d).meals.length)],
+ ["Как записать еду — 7 способов","bot","💬","Написать или сказать боту","Не открывая приложение: просто напиши боту, что съела, или запиши голосовое. Бот сам найдёт продукты и посчитает калории.","Чат с ботом в Telegram: «на обед 150 г гречки и котлета» — или голосовым. Запись появится в Дневнике. Можно прислать и фото тарелки.",()=>{ go("diary"); flashEl("#botHint"); },null],
+ ["Как записать еду — 7 способов","photo","📸","Фото тарелки","ИИ сам узнаёт блюда на фото, оценивает вес и калории. Удобно в гостях и в кафе, когда взвесить нечем.","Дневник → кнопка «Фото еды — ИИ посчитает сам» → сфотографируй тарелку → проверь граммы → «Добавить в дневник».",()=>{ go("diary"); flashEl("#aiWrap"); },null],
+ ["Как записать еду — 7 способов","barcode","▥","Штрихкод","Продукт из магазина находится по штрихкоду — с точными цифрами производителя.","Дневник → кнопка «Штрихкод» → наведи камеру на штрихкод упаковки → впиши, сколько грамм съела.",()=>{ go("diary"); flashEl("#fScan"); },null],
+ ["Как записать еду — 7 способов","label","🏷","Фото этикетки","Если продукта нет в базе — не нужно переписывать цифры вручную.","Дневник → кнопка «Этикетка» → сфотографируй таблицу «Пищевая ценность на 100 г» на упаковке. Цифры распознаются сами, продукт сохранится в твой справочник.",()=>{ go("diary"); flashEl("#fLabel"); },null],
+ ["Как записать еду — 7 способов","repeat","↻","Повторить приём пищи","Завтракаешь одинаково? Не нужно вводить всё заново — одно касание, и весь прошлый завтрак записан.","Дневник → выбери приём пищи (например, «Завтрак»). Если сегодня он ещё пустой, под полем продукта появится кнопка «↻ Завтрак как вчера».",()=>{ go("diary"); flashEl("#repeatWrap,#mealSeg"); },null],
+ ["Как записать еду — 7 способов","dishes","🍲","Свои блюда","Суп, запеканка, сырники по твоему рецепту — калории посчитаны из состава, дальше записываешь порцию в одно касание.","Меню → «Блюда» → «Новое блюдо» → впиши продукты и их вес. Или просто пришли боту ссылку на рецепт с сайта — он сохранит блюдо сам.",()=>goMenuSub("dishes"),()=>(typeof dishes==="function")&&dishes().length>0],
+ ["Меню и покупки","aimenu","✨","Меню на неделю от ИИ","Меню под твою норму калорий и БЖУ: без продуктов, которые ты не ешь, и с тем, что уже есть дома. Обед и ужин повторяются 2 дня подряд — готовишь один раз на два дня.","Меню → «План» → «✨ Составить меню на неделю с ИИ» → отметь, что не ешь → «Составить». Занимает около минуты.",()=>{ goMenuSub("plan"); flashEl("#aiMenuBtn",500); },()=>hasMenu()],
+ ["Меню и покупки","recipe","📖","Рецепт к любому блюду меню","Пошаговый рецепт и сколько чего взять: сухой крупы, сырого мяса — сразу на нужное число порций.","Меню → «План» → нажми на название блюда → выбери, на сколько порций готовишь → «Показать рецепт».",()=>{ goMenuSub("plan"); flashEl("[data-planinfo]",500); },null],
+ ["Меню и покупки","shop","🛒","Список покупок сам","Собирается из меню: одинаковые продукты сложены, крупы и мясо пересчитаны в то, что покупают в магазине (сухая гречка, сырое филе).","Меню → «Покупки». В магазине отмечай купленное галочками. Список можно скопировать и отправить.",()=>goMenuSub("shop"),null],
+ ["Меню и покупки","ideas","💡","Что приготовить из того, что дома","Не знаешь, что приготовить? Перечисли, что лежит в холодильнике, — приложение подберёт блюда и покажет, чего не хватает.","Меню → «Идеи» → впиши продукты, которые есть дома (например, «курица, гречка, кабачок»).",()=>goMenuSub("ideas"),null],
+ ["Меню и покупки","family","👨‍👩‍👧","Семья: общее меню и покупки","Одно меню и один список покупок на всю семью — а дневник и норма калорий у каждого свои.","Меню → «Семья» → «Создать семью» → пригласи родных ссылкой.",()=>goMenuSub("family"),null],
+ ["ИИ-помощник","assistant","🧠","Что съесть, чтобы уложиться в норму","Помощник смотрит, сколько калорий осталось и что есть дома, и предлагает 3 варианта. Понравившийся записывается одной кнопкой.","Дневник → «✨ Помощник» → «Что съесть сейчас?». Или спроси своими словами: «что съесть на ужин до 400 ккал?»",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); else flashEl("#botHint"); },300); },()=>typeof asstLog!=="undefined"&&asstLog.length>0],
+ ["ИИ-помощник","cafe","🧾","Выбор в кафе по фото меню","Помощник прочитает меню ресторана и выберет 3 блюда, которые впишутся в твою норму, плюс подскажет, как сэкономить калории.","Дневник → «✨ Помощник» → «Меню кафе по фото» → сфотографируй страницу меню.",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
+ ["ИИ-помощник","review","📊","Разбор недели","Как от нутрициолога: что получилось, на что обратить внимание и один выполнимый совет на следующую неделю.","Приходит сам в бот по воскресеньям, если за неделю было хотя бы 3 дня с записями. Или: «✨ Помощник» → «Разбор недели».",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
+ ["Тело и здоровье","health","❤️","Шаги из «Здоровья» на iPhone","Шаги и активные калории с iPhone и часов прибавляются к норме — в активный день можно съесть больше.","Дневник → «❤️ Подключить „Здоровье“» → один раз установи быструю команду по инструкции. Потом обновляешь одной кнопкой.",()=>{ go("diary"); flashEl("#hcRun,#hcConnect"); },()=>!!(typeof hcGet==="function"&&hcGet())],
+ ["Тело и здоровье","weight","⚖️","Вес, талия и дата цели","Видно, как идёт похудение, и примерную дату, когда дойдёшь до цели.","Вкладка «Вес» → впиши вес (раз в неделю, утром натощак) и, по желанию, талию → «Сохранить». График — во вкладке «Прогресс».",()=>{ go("weight"); flashEl("#wKg"); },()=>weights().length>0],
+ ["Тело и здоровье","cycle","🌸","Учёт цикла","Перед месячными вес часто растёт на 0,5–2 кг из-за воды. Приложение предупредит об этом заранее и отметит эти дни на графике — меньше поводов расстраиваться.","Вкладка «Вес» → «Цикл» → «Начались сегодня» в первый день месячных. Или напиши боту «начались».",()=>{ go("weight"); flashEl("#cycleCard"); },()=>cycleStarts().length>0,()=>isWoman()],
+ ["Тело и здоровье","fiber","🥦","Клетчатка","Кроме белков, жиров и углеводов считается клетчатка — она даёт сытость. Норма — 25 г в день для женщин, 30 г для мужчин.","Ничего делать не нужно — смотри полоску «Клетчатка» под БЖУ в Дневнике.",()=>{ go("diary"); flashEl(".fibrow"); },null],
+ ["Тело и здоровье","share","🏆","Карточка прогресса","Красивая картинка «минус N кг» для сторис или подруг — приятно и мотивирует.","Вкладка «Прогресс» → «Карточка прогресса — поделиться».",()=>{ go("progress"); flashEl("#progCard",500); },null],
+ ["Связь и удобство","install","📲","Приложение на экране «Домой»","Дневник открывается с иконки за секунду, как обычное приложение, — без поиска бота в Telegram.","Нажми «Попробовать» — покажу по шагам, что нажать.",()=>{ closeSheet(); if(TG) openExternal(APP_URL+"?install=1"); else showInstallGuide(); },()=>IS_STANDALONE||!!installState().installed],
+ ["Связь и удобство","remind","⏰","Напоминания от бота","Бот напомнит записать еду, если день пустой, и взвеситься; вечером пришлёт итог дня, в воскресенье — отчёт за неделю.","Профиль → «Сервер и бот» → «Напоминания бота»: отметь нужные, выбери время → «Сохранить напоминания».",()=>{ go("profile"); flashEl("#rmLog,#integrCards",500); },null],
+ ["Связь и удобство","coach","🏋️","Тренер или нутрициолог","Открой доступ своему тренеру — он увидит дневник и сможет оставлять комментарии. А если ты сама тренер — веди здесь клиентов.","Профиль → «Кабинет тренера».",()=>{ go("profile"); flashEl("#coachCards",500); },null],
+ ["Связь и удобство","excel","📄","Выгрузка в Excel","Весь дневник, вес и тренировки одним файлом — для себя или для врача.","Профиль → «Выгрузить в Excel».",()=>{ go("profile"); flashEl("#csvBtn",500); },null]
+];
+const featList=()=>FEATURES.filter(f=>!f[8]||f[8]());
+const featDone=f=>{ const st=featSt(); if(st.used&&st.used[f[1]]) return true; try{ return !!(f[7]&&f[7]()); }catch(e){ return false; } };
+function featCount(){ const l=featList(); return [l.filter(featDone).length,l.length]; }
+const WHY=[
+ "Записать еду можно 7 способами: найти по названию, сфотографировать тарелку, отсканировать штрихкод — или просто написать либо надиктовать боту в Telegram.",
+ "ИИ составляет меню на неделю под твою норму и сам собирает список покупок.",
+ "Рецепты к каждому блюду — сразу на нужное число порций.",
+ "Помощник подскажет, что съесть, и выберет блюдо в кафе по фото меню.",
+ "Шаги из «Здоровья» прибавляются к норме, а учёт цикла объясняет скачки веса.",
+ "Семья, тренер и Telegram — всё в одном месте, на русском и без рекламы."
+];
+function openFeatures(){
+  const [d,n]=featCount(), list=featList(); let g="";
+  const body=list.map((f,i)=>{ const done=featDone(f); const head=f[0]!==g?`<h3 class="feat-g">${esc(f[0])}</h3>`:""; g=f[0];
+    return head+`<div class="feat ${done?"done":""}"><div class="ic" aria-hidden="true">${done?"✓":f[2]}</div><div class="stack" style="gap:4px"><b>${esc(f[3])}</b><span class="small">${esc(f[4])}</span><span class="small"><b>Как:</b> ${esc(f[5])}</span><button class="${done?"ghost":""} small" data-feattry="${f[1]}" style="align-self:flex-start;${done?"padding-left:0":""}">${done?"Открыть ещё раз":"Попробовать"}</button></div></div>`; }).join("");
+  openSheet(`<div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">🧭 Что умеет дневник</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
+    <div class="card stack" style="background:var(--accent-soft);border:none;gap:8px"><b>Чем он лучше обычного счётчика калорий</b><ul class="feat-why small">${WHY.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
+    <div class="stack" style="gap:6px"><div class="row small" style="justify-content:space-between"><span>Ты попробовала</span><b class="num">${d} из ${n}</b></div><div class="feat-bar"><i style="width:${Math.round(d/n*100)}%"></i></div></div>
+    <div>${body}</div>`);
+}
+function pickFeatTip(){
+  const st=featSt(); const cand=featList().filter(f=>!featDone(f)&&!(st.skip&&st.skip[f[1]]));
+  if(!cand.length) return null;
+  const day=Math.floor(parseD(today()).getTime()/864e5); return cand[day%Math.min(cand.length,4)];
+}
+function renderFeatTip(){
+  const el=$("featTip"); if(!el) return; const st=featSt();
+  const p=$("featCountP"); if(p){ const [d,n]=featCount(); p.textContent=`Попробовано ${d} из ${n} · с кнопкой «Попробовать»`; }
+  if(st.off||curDate!==today()||!calc()||installWanted()){ el.hidden=true; return; }
+  const f=pickFeatTip(); if(!f){ el.hidden=true; return; }
+  const [d,n]=featCount();
+  el.hidden=false;
+  el.innerHTML=`<div class="row" style="gap:12px;align-items:flex-start;flex-wrap:nowrap"><div class="asst-ic" aria-hidden="true">${f[2]}</div><div class="stack" style="gap:3px;flex:1;min-width:0"><span class="small muted">А ты знала?</span><b>${esc(f[3])}</b><span class="small">${esc(f[4])}</span></div><button class="icon" data-featskip="${f[1]}" aria-label="Не интересно" style="flex:none">✕</button></div>
+    <div class="row" style="gap:8px"><button class="primary grow" data-feattry="${f[1]}">Попробовать</button><button class="grow" id="featOpen">Все возможности ${d}/${n}</button></div>`;
+}
+document.addEventListener("click",e=>{
+  const t=e.target; const b=t.closest&&t.closest("button,label"); if(!b) return;
+  if(b.dataset.feattry){ const f=FEATURES.find(x=>x[1]===b.dataset.feattry); if(!f) return; if(document.querySelector("#sbg2")&&f[1]!=="install") closeSheet(); try{ f[6](); }catch(err){} return; }
+  if(b.dataset.featskip){ const st=featSt(); Store.set("feat",{...st,skip:{...(st.skip||{}),[b.dataset.featskip]:today()}}); renderFeatTip(); return; }
+  if(b.id==="featOpen"||b.id==="featOpenP"){ openFeatures(); return; }
+  // отметки «попробовала» по реальным действиям
+  const map=[["#fScan,#pScan","barcode"],["#fLabel","label"],["#aiWrap","photo"],["#botChat","bot"],["[data-repeat]","repeat"],["#csvBtn","excel"],["#progCard,#pcSend,#pcSave,#pcStory","share"],['[data-msub="ideas"]',"ideas"],['[data-msub="shop"]',"shop"],['[data-msub="family"]',"family"],["#piAi,[data-planinfo]","recipe"],["#asstPhoto","cafe"],["[data-asreview]","review"],["[data-asq],#asstGo","assistant"]];
+  for(const [sel,id] of map) if(b.matches(sel)) featMark(id);
+});
+(function hookFeat(){
+  const _rd=renderDiary; renderDiary=function(){ _rd(); try{ renderFeatTip(); }catch(e){} };
+  const _ra=renderAll; renderAll=function(){ _ra(); try{ if(tab==="profile"){ const p=$("featCountP"); if(p){ const [d,n]=featCount(); p.textContent=`Попробовано ${d} из ${n} · с кнопкой «Попробовать»`; } } }catch(e){} };
+})();
 
 /* ================= ПОМОЩНИК (как бот, но в приложении) ================= */
 const ASST_KEY="asst-log";
