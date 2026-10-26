@@ -387,12 +387,17 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="tipsAgain">Показать подсказки заново</button>
     </div>
     <div class="card stack">
+      <h2>Удалить мои данные</h2>
+      <p class="note" style="margin:0">Сотрёт все твои записи, вес, меню, блюда и настройки — на этом телефоне, в Telegram и на сервере. Восстановить будет нельзя, поэтому сначала можешь сохранить резервную копию выше.</p>
+      <button id="delAcc" style="color:var(--warn)">Удалить все мои данные</button>
+    </div>
+    <div class="card stack">
       <h2>Проверка связи</h2>
       <p class="note" style="margin:0">Если не работает поиск в интернете или штрихкоды — нажми и пришли скриншот результата.</p>
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 43</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 44</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -3249,6 +3254,32 @@ function bind(){
     Store.set("profile",p); toast("Профиль сохранён");
   };
 }
+
+/* ================= УДАЛЕНИЕ ДАННЫХ ================= */
+async function wipeLocal(){
+  try{ if(TG&&TG.CloudStorage&&typeof tgCall==="function"){ const ks=await tgCall("getKeys"); for(let i=0;i<ks.length;i+=10) await tgCall("removeItems",ks.slice(i,i+10)); } }catch(e){}
+  try{ const ks=[]; for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i)); ks.forEach(k=>{ if(/^dnevnik|^asst-log|^hc-state|^calTimes|^ocrLang/.test(k)||k.includes("dnevnik")) localStorage.removeItem(k); }); }catch(e){}
+}
+function openDeleteAccount(){
+  openSheet(`<div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Удалить все данные?</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
+    <p class="small" style="margin:0">Будут удалены: дневник питания, вес и замеры, меню и покупки, свои блюда и продукты, цикл, настройки и напоминания. Ты выйдешь из семьи, тренер потеряет доступ.${typeof serverReady==="function"&&serverReady()?" Данные сотрутся и на сервере.":""}</p>
+    <p class="small" style="margin:0"><b>Вернуть их будет нельзя.</b> Чтобы подтвердить, напиши слово <b>УДАЛИТЬ</b>:</p>
+    <input id="delConf" autocomplete="off" placeholder="УДАЛИТЬ" aria-label="Подтверждение">
+    <button class="primary" id="delGo" style="background:var(--warn);border-color:var(--warn)" disabled>Удалить навсегда</button>
+    <div class="note" id="delMsg"></div>`);
+  $("delConf").oninput=()=>{ $("delGo").disabled=$("delConf").value.trim().toUpperCase()!=="УДАЛИТЬ"; };
+  $("delGo").onclick=async()=>{
+    $("delGo").disabled=true; $("delMsg").textContent="Удаляю…";
+    try{
+      if(typeof serverReady==="function"&&serverReady()) await sapi("account/delete",{confirm:"УДАЛИТЬ"});
+      await wipeLocal();
+      try{ Store.docs={}; }catch(e){}
+      $("delMsg").textContent="Готово. Все данные удалены.";
+      setTimeout(()=>{ if(TG){ try{ TG.close(); }catch(e){} } location.replace(location.pathname); },1500);
+    }catch(e){ $("delGo").disabled=false; $("delMsg").textContent="Не получилось: "+errText(e)+". Попробуй ещё раз или напиши нам."; }
+  };
+}
+document.addEventListener("click",e=>{ const b=e.target.closest&&e.target.closest("#delAcc"); if(b) openDeleteAccount(); });
 
 /* ================= ВОЗМОЖНОСТИ: каталог, «фишка дня», отметки «уже пробовала» ================= */
 const featSt=()=>Store.get("feat")||{used:{},skip:{}};

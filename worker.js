@@ -25,6 +25,24 @@ export class DnevnikStore extends DurableObject {
     return out;
   }
   async kputMany(entries) { const o = {}; for (const [k, v] of entries) o[k] = { v, exp: 0 }; await this.ctx.storage.put(o); }
+  async kdelPrefix(prefix) { const m = await this.ctx.storage.list({ prefix }); const ks = [...m.keys()]; for (let i = 0; i < ks.length; i += 128) await this.ctx.storage.delete(ks.slice(i, i + 128)); return ks.length; }
+  // резервная копия внутри хранилища: раз в неделю, храним 4 последние
+  async snapshot(tag, keep = 4) {
+    const skip = /^(bk:|ai:|sg:|undo:|mn:|rvw:|ln:|sess:|rcp:)/;
+    const all = await this.ctx.storage.list(), now = Date.now(); let batch = {}, n = 0, cnt = 0;
+    for (const [k, r] of all) { if (skip.test(k) || (r && r.exp && r.exp < now)) continue; batch[`bk:${tag}:${k}`] = r; n++; cnt++; if (n === 128) { await this.ctx.storage.put(batch); batch = {}; n = 0; } }
+    if (n) await this.ctx.storage.put(batch);
+    const idx = ((await this.ctx.storage.get("bkidx")) || []).filter(t => t !== tag).concat([tag]).sort();
+    while (idx.length > keep) await this.kdelPrefix(`bk:${idx.shift()}:`);
+    await this.ctx.storage.put("bkidx", idx);
+    return { tag, keys: cnt, kept: idx };
+  }
+  async purgeBackups(uid) {   // при удалении аккаунта — убрать человека и из резервных копий
+    const re = new RegExp(`^bk:[^:]+:(?:(?:u|d|ai|mn|rvw|sg|undo):${uid}:|(?:s|hp|j|n|uf|uhk|cl|cm|tl|tp):${uid}$)`);
+    const m = await this.ctx.storage.list({ prefix: "bk:" }); const ks = [...m.keys()].filter(k => re.test(k));
+    for (let i = 0; i < ks.length; i += 128) await this.ctx.storage.delete(ks.slice(i, i + 128));
+    return ks.length;
+  }
 }
 function storeKV(env) {
   if (env.KV) {
@@ -33,6 +51,8 @@ function storeKV(env) {
       get: (k, t) => kv.get(k, t), put: (k, v, o) => kv.put(k, v, o), delete: k => kv.delete(k),
       async listPrefix(prefix) { const out = []; let cursor; do { const r = await kv.list({ prefix, cursor }); for (const x of r.keys) out.push([x.name, await kv.get(x.name)]); cursor = r.list_complete ? null : r.cursor; } while (cursor); return out; },
       async putMany(entries) { for (const [k, v] of entries) await kv.put(k, String(v)); },
+      async delPrefix(prefix) { const l = await this.listPrefix(prefix); for (const [k] of l) await kv.delete(k); return l.length; },
+      async snapshot() { return null; },
     };
   }                       // если подключено обычное KV — используем его
   const stub = () => env.STORE.get(env.STORE.idFromName("main"));
@@ -42,6 +62,9 @@ function storeKV(env) {
     async delete(k) { await stub().kdel(k); },
     async listPrefix(prefix) { return await stub().klist(prefix); },
     async putMany(entries) { await stub().kputMany(entries.map(([k, v]) => [k, String(v)])); },
+    async delPrefix(prefix) { return await stub().kdelPrefix(prefix); },
+    async snapshot(tag) { return await stub().snapshot(tag); },
+    async purgeBackups(uid) { return await stub().purgeBackups(uid); },
   };
 }
 
@@ -78,6 +101,8 @@ export default {
   async scheduled(event, env, ctx) {
     env = { ...env, KV: storeKV(env) };
     ctx.waitUntil(runCron(env, new Date(event.scheduledTime)));
+    const t = new Date(event.scheduledTime);
+    if (t.getUTCDay() === 1 && t.getUTCHours() === 3 && t.getUTCMinutes() < 30 && env.KV.snapshot) ctx.waitUntil(env.KV.snapshot(t.toISOString().slice(0, 10)).catch(() => {}));
   },
 };
 
@@ -122,6 +147,28 @@ async function auth(req, env) {
   return { id: String(u.id), name: [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username || "Без имени" };
 }
 
+/* ---------------- удаление аккаунта: все данные человека с сервера ---------------- */
+async function deleteAccount(env, uid) {
+  let n = 0;
+  // семья
+  const fc = await env.KV.get(`uf:${uid}`);
+  if (fc) { const f = await kget(env, `fam:${fc}`); if (f && f.members) { f.members = f.members.filter(m => m.id !== uid); if (!f.members.length) await env.KV.delete(`fam:${fc}`); else { if (f.owner === uid) f.owner = f.members[0].id; await kput(env, `fam:${fc}`, f); } } }
+  // как клиент тренера
+  for (const t of (await kget(env, `cl:${uid}`, [])) || []) await kput(env, `tl:${t}`, ((await kget(env, `tl:${t}`, [])) || []).filter(x => x !== uid));
+  // как тренер
+  for (const c of (await kget(env, `tl:${uid}`, [])) || []) await kput(env, `cl:${c}`, ((await kget(env, `cl:${c}`, [])) || []).filter(x => x !== uid));
+  for (const [k, v] of await env.KV.listPrefix("tc:")) { let x = v; try { x = JSON.parse(v); } catch (e) {} if (String(x && x.uid || x) === uid) { await env.KV.delete(k); n++; } }
+  // ключ «Здоровья»
+  const hk = await env.KV.get(`uhk:${uid}`); if (hk) await env.KV.delete(`hk:${hk}`);
+  // сессии входа
+  for (const [k, v] of await env.KV.listPrefix("sess:")) { let x = v; try { x = JSON.parse(v); } catch (e) {} if (x && String(x.id) === uid) { await env.KV.delete(k); n++; } }
+  for (const k of ["s", "hp", "j", "n", "uf", "uhk", "cl", "cm", "tl", "tp"]) { await env.KV.delete(`${k}:${uid}`); n++; }
+  for (const pf of ["u", "d", "ai", "mn", "rvw", "sg", "undo"]) n += await env.KV.delPrefix(`${pf}:${uid}:`);
+  await kput(env, "users", ((await kget(env, "users", [])) || []).filter(x => String(x) !== uid));
+  if (env.KV.purgeBackups) n += await env.KV.purgeBackups(uid);
+  return { ok: true, removed: n };
+}
+
 /* ---------------- вход в отдельном приложении через бота ---------------- */
 async function loginStart(env) {
   const nonce = rid(24), bot = await botUsername(env);
@@ -134,7 +181,7 @@ async function loginCheck(env, url) {
   if (!r) return json({ status: "expired" });
   if (!r.uid) return json({ status: "wait" });
   const token = rid(32);
-  await kput(env, `sess:${token}`, { id: r.uid, name: r.name }, 60 * 60 * 24 * 365);
+  await kput(env, `sess:${token}`, { id: r.uid, name: r.name }, 60 * 60 * 24 * 90);
   await env.KV.delete(`ln:${nonce}`);
   return json({ status: "ok", token, user: { id: r.uid, name: r.name } });
 }
@@ -1089,6 +1136,10 @@ async function api(req, env, url, user, ctx) {
     let k = await env.KV.get(`uhk:${user.id}`);
     if (!k) { k = rid(20); await env.KV.put(`hk:${k}`, user.id); await env.KV.put(`uhk:${user.id}`, k); }
     return json({ key: k });
+  }
+  if (p === "account/delete") {
+    if (body.confirm !== "УДАЛИТЬ") return json({ error: "Нет подтверждения" }, 400);
+    return json(await deleteAccount(env, user.id));
   }
   if (p === "logout") { if (user.session) await env.KV.delete(`sess:${user.session}`); return json({ ok: true }); }
   if (p === "ai/photo") return await aiPhoto(env, user, body);
