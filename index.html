@@ -364,7 +364,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 34</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 36</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -1818,14 +1818,14 @@ function openPlanInfo(id){
     ${multi>1?`<p class="note" style="margin:0">Это блюдо в меню ${multi} ${plural(multi,"раз","раза","раз")}${/Обед|Ужин/.test(e.meal)?` — удобно приготовить сразу: возьми всё ×${multi}`:""}. В списке покупок это уже учтено.</p>`:""}
     <h3 style="margin:4px 0 0">Как приготовить</h3>
     <div id="piHow" class="small" style="white-space:pre-line">${how?esc(how):""}</div>
-    ${how?"":(typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai?`<button id="piAi">✨ Показать рецепт</button>`:`<p class="note" style="margin:0">Рецепт появится, когда подключён сервер с ИИ.</p>`)}
+    ${typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai?`<button id="piAi" ${how?'class="ghost small" style="padding:0;align-self:flex-start"':""}>${how?"↻ Рецепт странный? Написать заново":"✨ Показать рецепт"}</button>`:(how?"":`<p class="note" style="margin:0">Рецепт появится, когда подключён сервер с ИИ.</p>`)}
     <p class="note" style="margin:0">Взвешивай ингредиенты перед готовкой — так калории в дневнике совпадут с тарелкой. Готовишь больше — записывай в дневник по весу своей порции.</p>`);
   const b=$("piAi"); if(b) b.onclick=async()=>{
-    b.disabled=true; b.textContent="ИИ пишет рецепт…";
+    const was=b.textContent; b.disabled=true; b.textContent="ИИ пишет рецепт…";
     try{ const r=await sapi("ai/recipe",{name:e.name,ing:ing.map(i=>[i.name,i.g])}); const txt=(r.time?`⏱ ${r.time}\n`:"")+(r.steps||[]).map((x,i)=>`${i+1}. ${x}`).join("\n");
       const w=getWeek(menuWeek); Object.values(w.days).forEach(a=>(a||[]).forEach(x=>{ if(norm(x.name)===norm(e.name)) x.how=txt; })); putWeek(menuWeek,w);
-      $("piHow").textContent=txt; b.remove(); }
-    catch(err){ b.disabled=false; b.textContent="✨ Показать рецепт"; toast(errText(err)); }
+      $("piHow").textContent=txt; b.disabled=false; b.className="ghost small"; b.style.cssText="padding:0;align-self:flex-start"; b.textContent="↻ Рецепт странный? Написать заново"; }
+    catch(err){ b.disabled=false; b.textContent=was; toast(errText(err)); }
   };
 }
 function shopItems(){
@@ -2214,8 +2214,9 @@ function applyHealth(sp){
 }
 const SC_NAME="Дневник Здоровье";
 let healthWait=0;
-const hcGet=()=>{ try{ return localStorage.getItem("hc-state")||""; }catch(e){ return ""; } };
-const hcSet=v=>{ try{ localStorage.setItem("hc-state",v); }catch(e){} };
+// отметка «команда уже добавлена» — в аккаунте, чтобы не добавлять её второй раз из Telegram или с экрана «Домой»
+const hcGet=()=>{ const v=(Store.get("hc")||{}).state; if(v) return v; try{ return localStorage.getItem("hc-state")||""; }catch(e){ return ""; } };
+const hcSet=v=>{ try{ Store.set("hc",{state:v}); }catch(e){} try{ localStorage.setItem("hc-state",v); }catch(e){} };
 function hcConnect(){ hcSet("pending"); openExternal(HEALTH_SC); }
 function applyHealthData(h){
   if(!h||!/^\d{4}-\d{2}-\d{2}$/.test(h.date||"")||!h.at) return false;
@@ -2259,7 +2260,7 @@ function healthCardHtml(){
     <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Команда уже добавлена</button>`;
   return intro+`
     <button class="primary" id="hcRun">Обновить из «Здоровья»</button>
-    <button class="ghost small" id="hcAdd" style="padding:0;align-self:flex-start">Добавить команду заново</button>
+    <details><summary class="small muted">Пишет «Не удалось найти быструю команду»?</summary><p class="small" style="margin:6px 0">В приложении «Команды» должна быть ровно одна команда с названием <b>${SC_NAME}</b>, без цифр. Удали лишние копии («${SC_NAME} 1», «… 2»): долгое нажатие → «Удалить», а оставшуюся переименуй ровно в «${SC_NAME}». Если команды нет совсем — <button class="ghost small" id="hcAdd" style="padding:0">добавь её заново</button>.</p></details>
     <details><summary class="small"><b>Чтобы приходило само каждый вечер</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
       <li>Приложение «Команды» → внизу «Автоматизация» → «+».</li>
       <li>«Время суток» → например 21:30, «Ежедневно» → «Запускать сразу» → «Далее».</li>

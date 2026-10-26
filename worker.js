@@ -245,7 +245,9 @@ function pickJSON(t) {
   }
   return null;
 }
-async function claudeJSON(env, uid, content, maxTokens = 4000) {
+const RU_ONLY = "\nПиши только по-русски: никаких английских слов и латиницы (кроме единиц вроде «г»).";
+const hasLatin = o => /[A-Za-z]{3,}/.test(JSON.stringify(o).replace(/"[a-z]{1,6}":/g, ""));
+async function claudeJSON(env, uid, content, maxTokens = 4000, model) {
   if (!env.ANTHROPIC_API_KEY) throw new Error("на сервере нет ключа ИИ");
   const day = new Date().toISOString().slice(0, 10), ck = `ai:${uid}:${day}`;
   const used = +(await env.KV.get(ck) || 0);
@@ -259,8 +261,8 @@ async function claudeJSON(env, uid, content, maxTokens = 4000) {
     const raw = await r.text(); let data = {}; try { data = JSON.parse(raw); } catch (e) {}
     return { ok: r.ok, status: r.status, data };
   };
-  let r = await call(env.AI_MODEL || MODEL_MAIN);
-  if (!r.ok && (r.status === 400 || r.status === 404)) r = await call(MODEL_FALLBACK);
+  let r = await call(model || env.AI_MODEL || MODEL_MAIN);
+  if (!r.ok && (r.status === 400 || r.status === 404)) r = await call(model ? MODEL_MAIN : MODEL_FALLBACK);
   if (!r.ok) throw new Error((r.data.error && r.data.error.message) || ("ИИ ответил ошибкой " + r.status));
   await env.KV.put(ck, String(used + 1), { expirationTtl: 60 * 60 * 30 });
   const textOf = d => (d.content || []).map(c => c.text || "").join("");
@@ -522,7 +524,7 @@ async function botSuggest(env, uid, s, ask) {
   const d = await dayLeft(env, uid, s);
   const pd = await kget(env, `u:${uid}:d:pantry`), pantry = ((pd && pd.v && pd.v.items) || []).slice(0, 60);
   const dishes = (await userDishes(env, uid)).map(x => x.name).slice(0, 30);
-  const j = await claudeJSON(env, uid, [{ type: "text", text: SUGGEST_PROMPT(d, pantry, dishes, ask) }], 3000);
+  const j = await claudeJSON(env, uid, [{ type: "text", text: SUGGEST_PROMPT(d, pantry, dishes, ask) + COOK_SENSE + RU_ONLY }], 3000, MODEL_FALLBACK);
   const opts = (j.options || []).filter(o => o && o.name && (o.items || []).length).slice(0, 3).map(o => ({ name: String(o.name).slice(0, 60), how: String(o.how || "").slice(0, 200), items: o.items.filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 60), g: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0 })) }));
   if (!opts.length) { await send(env, uid, "Не получилось придумать варианты — попробуй спросить иначе, например: «что съесть на ужин?»"); return; }
   const tok = rid(10); await kput(env, `sg:${uid}:${tok}`, opts, 60 * 60 * 24);
@@ -539,7 +541,7 @@ grams — вес порции; kcal, p, f, c — на 100 г. Если меню 
 
 async function botCafe(env, uid, s, imgB64, caption) {
   const d = await dayLeft(env, uid, s);
-  const j = await claudeJSON(env, uid, [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: imgB64 } }, { type: "text", text: MENU_PROMPT(d) + (caption ? `\nПодпись пользователя: «${String(caption).slice(0, 200)}»` : "") }], 2500);
+  const j = await claudeJSON(env, uid, [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: imgB64 } }, { type: "text", text: MENU_PROMPT(d) + RU_ONLY + (caption ? `\nПодпись пользователя: «${String(caption).slice(0, 200)}»` : "") }], 2500, MODEL_FALLBACK);
   const opts = (j.options || []).filter(o => o && o.name).slice(0, 3).map(o => ({ name: String(o.name).slice(0, 70), why: String(o.why || "").slice(0, 160), items: [{ name: String(o.name).slice(0, 70), g: Math.max(1, Math.round(+o.grams || 250)), kcal: +o.kcal || 0, p: +o.p || 0, f: +o.f || 0, c: +o.c || 0 }] }));
   if (!opts.length) { await send(env, uid, `Не получилось прочитать меню. ${esc(j.note || "")}\nСфотографируй страницу ровнее и ближе.`); return; }
   const tok = rid(10); await kput(env, `sg:${uid}:${tok}`, opts, 60 * 60 * 24);
@@ -564,7 +566,7 @@ async function weekReview(env, uid, today) {
 Данные по дням (ккал, Б/Ж/У в г, норма с учётом активности, шаги, вес, что ел):
 ${days.map(d => `${d.date}: ${d.kcal} ккал из ${d.norm || "?"}; Б ${d.p} Ж ${d.f} У ${d.c}; шаги ${d.steps || "—"}; вес ${d.w || "—"}; ${d.foods.join(", ")}`).join("\n")}
 Формат ответа — ТОЛЬКО JSON: {"good":["1–2 пункта, что получилось"],"watch":["1–2 пункта, на что обратить внимание, с цифрами"],"tip":"один конкретный совет на следующую неделю, выполнимый"}`;
-  const j = await claudeJSON(env, uid, [{ type: "text", text: prompt }], 1500);
+  const j = await claudeJSON(env, uid, [{ type: "text", text: prompt + RU_ONLY }], 1500, MODEL_FALLBACK);
   const li = a => (a || []).slice(0, 2).map(x => `• ${esc(String(x))}`).join("\n");
   return `🧑‍⚕️ <b>Разбор недели</b>\n\n<b>Что получилось</b>\n${li(j.good)}\n\n<b>На что обратить внимание</b>\n${li(j.watch)}\n\n<b>Совет на неделю</b>\n${esc(String(j.tip || ""))}`;
 }
@@ -581,6 +583,7 @@ async function botCycle(env, uid, s) {
   await send(env, uid, `🌸 Отметила: первый день цикла — сегодня.\nСледующие примерно ${next} (цикл ~${avg} дн.).\n\nВ ближайшие дни вес может быть выше обычного из-за воды — это не жир, смотри на тренд за неделю.`, { reply_markup: openBtn(env) });
 }
 
+const COOK_SENSE = "\nЗдравый смысл кухни: свежие огурцы, помидоры, листовой салат и зелень не жарят и не греют — их едят свежими; блюда — такие, как реально едят в России.";
 /* --- меню на неделю от ИИ --- */
 async function aiMenu(env, user, b) {
   const n = Math.round(+b.norm || 0); if (!(n >= 900 && n <= 5000)) throw new Error("Сначала заполни профиль — нужна норма калорий");
@@ -603,7 +606,8 @@ ${dishes.length ? `— Можно включать свои блюда поль�
 — Для каждого блюда — "r": как приготовить, 1–3 коротких шага в одну строку (до 200 символов).
 Ответь ТОЛЬКО компактным JSON: {"days":[{"meals":[{"m":"Завтрак","n":"Овсянка с бананом","r":"Свари овсянку на молоке 5 минут, добавь нарезанный банан.","i":[["Овсянка на молоке",250,102,3.2,4.1,14.2],["Банан",100,96,1.5,0.5,21]]}]}]}
 где в "i" каждый продукт — [название, граммы, ккал, белки, жиры, углеводы] на 100 г.`;
-    const j = await claudeJSON(env, user.id, [{ type: "text", text: prompt }], 4000);
+    let j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000);
+    if (hasLatin(j) || !(j.days || []).length) j = await claudeJSON(env, user.id, [{ type: "text", text: prompt + COOK_SENSE + RU_ONLY }], 4000, MODEL_FALLBACK);
     return (j.days || []).slice(0, cnt);
   };
   const parts = await Promise.all(chunks.map((c, k) => one(c, k).catch(e => { throw e; })));
@@ -974,7 +978,15 @@ async function api(req, env, url, user, ctx) {
   if (p === "ai/recipe") {
     try {
       const ing = (body.ing || []).slice(0, 20).map(x => `${String(x[0]).slice(0, 60)} — ${Math.round(+x[1] || 0)} г`).join("\n");
-      const j = await claudeJSON(env, user.id, [{ type: "text", text: `Напиши простой рецепт блюда «${String(body.name || "").slice(0, 80)}» из этих ингредиентов (вес — на одну порцию, в готовом виде для круп и мяса):\n${ing}\nКоротко и понятно, 3–6 шагов, без лишних ингредиентов (можно соль, специи, вода). Ответь ТОЛЬКО JSON: {"time":"20 минут","steps":["..."]}` }], 1200);
+      const j = await claudeJSON(env, user.id, [{ type: "text", text: `Ты — опытный домашний повар. Напиши рецепт блюда «${String(body.name || "").slice(0, 80)}» на одну порцию из этих ингредиентов:\n${ing}
+Правила:
+— Вес круп, макарон и бобовых указан в ГОТОВОМ виде. Напиши, сколько взять сухих (гречка и рис — примерно ×0,4, макароны — ×0,42, булгур и киноа — ×0,35) и как их сварить.
+— Мясо, птица и рыба указаны в готовом виде. Напиши, сколько взять сырого (примерно ×1,35) и как приготовить: время, огонь или температура духовки.
+— Свежие овощи и зелень (огурцы, помидоры, листовой салат, редис, перец для салата, зелень) НЕ жарь и не грей: нарежь и подай свежими — отдельно или салатом.
+— Масло — для заправки салата или для жарки, по смыслу.
+— Шаги такие, как реально готовят дома, без странных сочетаний. Если блюдо логично готовить заранее (крупа, мясо) — так и напиши.
+— 3–6 шагов, на «ты», коротко.${RU_ONLY}
+Ответь ТОЛЬКО JSON: {"time":"30 минут","steps":["..."]}` }], 1500, MODEL_FALLBACK);
       return json({ time: String(j.time || "").slice(0, 40), steps: (j.steps || []).map(x => String(x).slice(0, 300)).slice(0, 8) });
     } catch (e) { return json({ error: String(e.message || e) }, 502); }
   }
