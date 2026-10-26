@@ -116,6 +116,14 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .kv{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:14px}
 .kv b{font-variant-numeric:tabular-nums;text-align:right}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.asst-open{display:flex;align-items:center;gap:12px;width:100%;font:inherit;color:inherit;cursor:pointer;padding:12px 14px}
+.asst-ic{width:36px;height:36px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
+.asst-log{display:flex;flex-direction:column;gap:10px;min-height:120px;max-height:calc(90vh - 190px);overflow-y:auto;overscroll-behavior:contain;padding-right:2px}
+.asst-m{max-width:88%;padding:10px 12px;border-radius:14px;line-height:1.4;white-space:pre-line;font-size:15px}
+.asst-m.u{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.asst-m.a{align-self:flex-start;background:var(--surface2);border-bottom-left-radius:4px}
+.asst-opt{background:var(--surface);border:1px solid var(--line,rgba(0,0,0,.08));border-radius:12px;padding:10px 12px;margin-top:8px;white-space:normal}
+.asst-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}.asst-chips .chip{white-space:nowrap;flex:none}
 .ig-bg{position:fixed;inset:0;z-index:200;background:rgba(10,20,14,.55);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(16px,env(safe-area-inset-top,0px)) 16px 0}
 .ig-card{background:var(--surface);border-radius:18px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 .ig-card ol{margin:10px 0 0;padding-left:22px;display:grid;gap:10px}.ig-card li{line-height:1.35}
@@ -235,6 +243,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
     <div id="localNote" class="banner" hidden></div>
     <div id="noProfile" class="banner" hidden>Сначала заполни <button class="ghost" data-go="profile">профиль</button> — без него приложение не знает твою норму калорий.</div>
     <div class="card" id="summary"></div>
+    <button class="card asst-open" id="assistOpen" hidden><span class="asst-ic" aria-hidden="true">✨</span><span class="stack" style="gap:2px;text-align:left;flex:1"><b>Помощник</b><span class="small muted">Что съесть сейчас, выбор в кафе по фото меню, разбор недели</span></span><span class="muted" aria-hidden="true">›</span></button>
     <div class="card" id="coachNotes" hidden style="border-color:var(--accent)"></div>
     <div class="banner small" id="cycleNote" hidden style="background:#FBEAF0;color:#5A2236;border-color:#F2C6D4"></div>
 
@@ -373,7 +382,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 40</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 41</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -3230,6 +3239,75 @@ function bind(){
     Store.set("profile",p); toast("Профиль сохранён");
   };
 }
+
+/* ================= ПОМОЩНИК (как бот, но в приложении) ================= */
+const ASST_KEY="asst-log";
+let asstLog=(()=>{ try{ return JSON.parse(localStorage.getItem(ASST_KEY)||"[]")||[]; }catch(e){ return []; } })();
+const asstSave=()=>{ asstLog=asstLog.slice(-30); try{ localStorage.setItem(ASST_KEY,JSON.stringify(asstLog)); }catch(e){} };
+const rich=t=>esc(String(t||"")).replace(/&lt;(\/?)(b|i)&gt;/g,"<$1$2>");
+function asstCtx(){ const c=calc(), t=dayTotals(today()); return c?{norm:c.kcal+t.burn,kcal:Math.round(t.kcal),p:Math.round(t.p),f:Math.round(t.f),c:Math.round(t.c),meal:autoMeal()}:{meal:autoMeal()}; }
+function asstMsgHtml(m,i){
+  if(m.role==="u") return `<div class="asst-m u">${m.photo?"📷 ":""}${esc(m.text||"")}</div>`;
+  if(m.pending) return `<div class="asst-m a muted">${esc(m.text||"Думаю…")}</div>`;
+  let h="";
+  if(m.left) h+=`<div>${rich(m.left)}</div>`;
+  if(m.text) h+=`<div>${rich(m.text)}</div>`;
+  (m.opts||[]).forEach((o,k)=>{ const kc=o.items.reduce((a,x)=>a+x.kcal*x.g/100,0);
+    h+=`<div class="asst-opt"><div class="row" style="justify-content:space-between;gap:8px"><b>${esc(o.name)}</b><span class="num small">~${fmt(kc)} ккал</span></div>
+      ${o.how||o.why?`<div class="small" style="margin-top:4px">${esc(o.how||o.why)}</div>`:""}
+      ${m.kind==="suggest"?`<div class="small muted" style="margin-top:4px">${o.items.map(x=>`${esc(x.name)} ${fmt(x.g)} г`).join(", ")}</div>`:""}
+      <button class="${o.done?"ghost":"primary"} small" data-asrec="${i}:${k}" style="margin-top:8px" ${o.done?"disabled":""}>${o.done?"✓ Записано":`Записать в ${esc((m.meal||autoMeal()).toLowerCase())}`}</button></div>`; });
+  if(m.tip) h+=`<div style="margin-top:8px">💡 ${esc(m.tip)}</div>`;
+  if(m.kind==="cafe"&&!(m.opts||[]).length) h+=`<div>Не получилось прочитать меню. ${esc(m.note||"")} Сфотографируй страницу ровнее и ближе.</div>`;
+  if(m.kind==="suggest"&&!(m.opts||[]).length) h+=`<div>Не получилось придумать варианты — спроси иначе, например: «что съесть на ужин?»</div>`;
+  return `<div class="asst-m a">${h}</div>`;
+}
+function asstDraw(){
+  const el=$("asstLog"); if(!el) return;
+  el.innerHTML=asstLog.length?asstLog.map(asstMsgHtml).join(""):`<div class="asst-m a">Привет! Я подскажу, что съесть, чтобы уложиться в норму, помогу выбрать блюдо в кафе по фото меню и разберу твою неделю. Можно спросить и про питание вообще: «сколько белка в день мне нужно?»</div>`;
+  el.scrollTop=el.scrollHeight;
+}
+async function asstSend(kind,text,image){
+  if(!(typeof serverReady==="function"&&serverReady())){ toast("Помощник работает, когда выполнен вход через Telegram"); return; }
+  asstLog.push({role:"u",text:text||(kind==="cafe"?"Фото меню":"Разбор недели"),photo:!!image});
+  const wait={role:"a",pending:true,text:kind==="cafe"?"Читаю меню… 10–20 секунд":kind==="review"?"Смотрю твою неделю…":"Думаю…"}; asstLog.push(wait); asstDraw();
+  try{
+    const r=await sapi("ai/assist",{kind,text,image,ctx:asstCtx()});
+    Object.assign(wait,{pending:false,text:r.text||"",left:r.left||"",opts:r.opts||[],tip:r.tip||"",note:r.note||"",kind:r.kind,meal:autoMeal(),day:today()});
+    if(r.kind==="answer"&&!r.text) wait.text="Не получилось ответить — спроси иначе.";
+  }catch(e){ Object.assign(wait,{pending:false,text:"Не получилось: "+errText(e)}); }
+  asstSave(); asstDraw();
+}
+function openAssistant(){
+  openSheet(`<div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">✨ Помощник</h2><div class="row" style="gap:6px">${asstLog.length?`<button class="ghost small" id="asstClear">Очистить</button>`:""}<button class="icon" data-close aria-label="Закрыть">✕</button></div></div>
+    <div class="asst-log" id="asstLog"></div>
+    <div class="asst-chips">
+      <button class="chip" data-asq="Что мне съесть сейчас?">🍽 Что съесть сейчас?</button>
+      <button class="chip" data-asq="Лёгкий ужин до 400 ккал">🌙 Лёгкий ужин</button>
+      <label class="chip" style="cursor:pointer">🧾 Меню кафе по фото<input type="file" accept="image/*" id="asstPhoto" hidden></label>
+      <button class="chip" data-asreview="1">📊 Разбор недели</button>
+    </div>
+    <div class="row" style="gap:8px;flex-wrap:nowrap"><input id="asstIn" class="grow" placeholder="Спроси про питание…" enterkeyhint="send" aria-label="Вопрос помощнику"><button class="primary" id="asstGo" aria-label="Отправить">➤</button></div>`);
+  asstDraw();
+  const go=()=>{ const v=$("asstIn").value.trim(); if(!v) return; $("asstIn").value=""; $("asstIn").blur(); asstSend("auto",v); };
+  $("asstGo").onclick=go; $("asstIn").onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); go(); } };
+  $("asstPhoto").onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; e.target.value="";
+    loadImageFile(f).then(({img,url})=>{ const d=resizeToJpeg(img,1400,0.85); URL.revokeObjectURL(url); asstSend("cafe","",d.split(",")[1]); }).catch(()=>toast("Не получилось открыть фото")); };
+  const cl=$("asstClear"); if(cl) cl.onclick=()=>{ asstLog=[]; asstSave(); openAssistant(); };
+}
+document.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest("button"); if(!b) return;
+  if(b.id==="assistOpen"){ openAssistant(); return; }
+  if(b.dataset.asq){ asstSend("suggest",b.dataset.asq); return; }
+  if(b.dataset.asreview){ asstSend("review",""); return; }
+  if(b.dataset.asrec){ const [i,k]=b.dataset.asrec.split(":").map(Number), m=asstLog[i], o=m&&m.opts&&m.opts[k]; if(!o||o.done) return;
+    const day=today(), d=clone(getDay(day)), ml=MEALS.includes(m.meal)?m.meal:autoMeal();
+    o.items.forEach(x=>d.meals.push({id:uidGen(),meal:ml,name:x.name,g:r1(x.g),kcal:r1(x.kcal),p:r1(x.p),f:r1(x.f),c:r1(x.c)})); putDay(day,d);
+    o.done=true; asstSave(); asstDraw(); toast(`${o.name}: записано в ${ml.toLowerCase()}`); }
+});
+(function hookAssist(){
+  const _rd=renderDiary; renderDiary=function(){ _rd(); try{ const b=$("assistOpen"); if(b) b.hidden=!(typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai&&curDate===today()); }catch(e){} };
+})();
 
 /* ================= УСТАНОВКА НА ЭКРАН «ДОМОЙ» ================= */
 const IS_IOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);

@@ -553,12 +553,15 @@ ${dishes.length ? `Свои блюда пользователя: ${dishes.join("
 Ответь ТОЛЬКО JSON: {"options":[{"name":"короткое название","how":"одна фраза: из чего и как приготовить","items":[{"name":"...","grams":число,"kcal":число,"p":число,"f":число,"c":число}]}]}
 kcal, p, f, c — на 100 г каждого продукта.`;
 
-async function botSuggest(env, uid, s, ask) {
-  const d = await dayLeft(env, uid, s);
+async function suggestCore(env, uid, d, ask) {
   const pd = await kget(env, `u:${uid}:d:pantry`), pantry = ((pd && pd.v && pd.v.items) || []).slice(0, 60);
   const dishes = (await userDishes(env, uid)).map(x => x.name).slice(0, 30);
   const j = await claudeJSON(env, uid, [{ type: "text", text: SUGGEST_PROMPT(d, pantry, dishes, ask) + COOK_SENSE + RU_ONLY }], 3000, MODEL_FALLBACK);
-  const opts = (j.options || []).filter(o => o && o.name && (o.items || []).length).slice(0, 3).map(o => ({ name: String(o.name).slice(0, 60), how: String(o.how || "").slice(0, 200), items: o.items.filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 60), g: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0 })) }));
+  return (j.options || []).filter(o => o && o.name && (o.items || []).length).slice(0, 3).map(o => ({ name: String(o.name).slice(0, 60), how: String(o.how || "").slice(0, 200), items: o.items.filter(x => x && x.name).map(x => ({ name: String(x.name).slice(0, 60), g: Math.max(1, Math.round(+x.grams || 100)), kcal: +x.kcal || 0, p: +x.p || 0, f: +x.f || 0, c: +x.c || 0 })) }));
+}
+async function botSuggest(env, uid, s, ask) {
+  const d = await dayLeft(env, uid, s);
+  const opts = await suggestCore(env, uid, d, ask);
   if (!opts.length) { await send(env, uid, "Не получилось придумать варианты — попробуй спросить иначе, например: «что съесть на ужин?»"); return; }
   const tok = rid(10); await kput(env, `sg:${uid}:${tok}`, opts, 60 * 60 * 24);
   const lines = opts.map((o, i) => { const t = totalsOf(o.items); return `<b>${i + 1}. ${esc(o.name)}</b> — ${fmt(t.kcal)} ккал\n${esc(o.how)}\n<i>${o.items.map(x => `${esc(x.name)} ${fmt(x.g)} г`).join(", ")}</i>`; });
@@ -572,10 +575,14 @@ ${d.left != null ? `У человека на сегодня осталось ${d
 {"options":[{"name":"блюдо из меню","why":"почему хороший выбор, 1 фраза","grams":число,"kcal":число,"p":число,"f":число,"c":число}],"tip":"совет","note":""}
 grams — вес порции; kcal, p, f, c — на 100 г. Если меню не читается — пустой options и в note скажи почему.`;
 
-async function botCafe(env, uid, s, imgB64, caption) {
-  const d = await dayLeft(env, uid, s);
+async function cafeCore(env, uid, d, imgB64, caption) {
   const j = await claudeJSON(env, uid, [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: imgB64 } }, { type: "text", text: MENU_PROMPT(d) + RU_ONLY + (caption ? `\nПодпись пользователя: «${String(caption).slice(0, 200)}»` : "") }], 2500, MODEL_FALLBACK);
   const opts = (j.options || []).filter(o => o && o.name).slice(0, 3).map(o => ({ name: String(o.name).slice(0, 70), why: String(o.why || "").slice(0, 160), items: [{ name: String(o.name).slice(0, 70), g: Math.max(1, Math.round(+o.grams || 250)), kcal: +o.kcal || 0, p: +o.p || 0, f: +o.f || 0, c: +o.c || 0 }] }));
+  return { opts, tip: String(j.tip || "").slice(0, 300), note: String(j.note || "").slice(0, 300) };
+}
+async function botCafe(env, uid, s, imgB64, caption) {
+  const d = await dayLeft(env, uid, s);
+  const { opts, ...j } = await cafeCore(env, uid, d, imgB64, caption);
   if (!opts.length) { await send(env, uid, `Не получилось прочитать меню. ${esc(j.note || "")}\nСфотографируй страницу ровнее и ближе.`); return; }
   const tok = rid(10); await kput(env, `sg:${uid}:${tok}`, opts, 60 * 60 * 24);
   const lines = opts.map((o, i) => `<b>${i + 1}. ${esc(o.name)}</b> — ~${fmt(o.items[0].g / 100 * o.items[0].kcal)} ккал\n${esc(o.why)}`);
@@ -583,6 +590,34 @@ async function botCafe(env, uid, s, imgB64, caption) {
 }
 const isSuggestAsk = t => /(что|чего|чем)\s+(бы\s+)?(мне\s+)?(съесть|поесть|покушать|приготовить|перекусить|поужинать|пообедать|позавтракать)|посоветуй.*(ужин|обед|завтрак|перекус|съесть|поесть)|иде[ия].*(ужин|обед|завтрак|перекус)|что на (ужин|обед|завтрак|перекус)\s*\?/i.test(t);
 const isMenuCaption = t => /меню|кафе|ресторан|что заказать|заказать/i.test(t || "");
+
+/* --- помощник в приложении: те же функции, что у бота, без истории переписки (поэтому не дороже) --- */
+async function aiAssist(env, user, b) {
+  const uid = user.id, s = await userSettings(env, uid);
+  const d = await dayLeft(env, uid, s);
+  if (b.ctx && +b.ctx.norm > 0) { d.norm = Math.round(+b.ctx.norm); d.eaten = { kcal: +b.ctx.kcal || 0, p: +b.ctx.p || 0, f: +b.ctx.f || 0, c: +b.ctx.c || 0 }; d.left = Math.round(d.norm - d.eaten.kcal); }
+  if (b.ctx && b.ctx.meal) d.meal = String(b.ctx.meal).slice(0, 20);
+  const left = leftLine(d);
+  if (b.kind === "cafe") {
+    const img = String(b.image || "").replace(/^data:image\/\w+;base64,/, ""); if (!img || img.length > 5_000_000) throw new Error("Нет фото или оно слишком большое");
+    const r = await cafeCore(env, uid, d, img, b.text);
+    return { kind: "cafe", left, ...r };
+  }
+  if (b.kind === "review") {
+    const today = localDate(new Date(), s.tz), ck = `rvw:${uid}:${today}`;
+    let t = await kget(env, ck);
+    if (!t) { t = await weekReview(env, uid, today); if (t) await kput(env, ck, t, 60 * 60 * 24); }
+    return { kind: "review", text: t || "Для разбора нужно хотя бы 3 дня с записями за последнюю неделю — записывай еду, и я разберу." };
+  }
+  const q = String(b.text || "").trim().slice(0, 500); if (!q) throw new Error("Пустой вопрос");
+  if (b.kind === "suggest" || isSuggestAsk(q)) return { kind: "suggest", left, opts: await suggestCore(env, uid, d, q) };
+  const j = await claudeJSON(env, uid, [{ type: "text", text: `Ты — доброжелательный нутрициолог в дневнике питания для худеющих. Ответь на вопрос коротко (2–5 предложений), по делу, на «ты», без морализаторства. Не ставь диагнозы; если вопрос про здоровье серьёзный — посоветуй обратиться к врачу.
+${d.left != null ? `Контекст: норма ${d.norm} ккал, съедено сегодня ${Math.round(d.eaten.kcal)} ккал (Б ${Math.round(d.eaten.p)}, Ж ${Math.round(d.eaten.f)}, У ${Math.round(d.eaten.c)} г).` : ""}
+Если человек пишет, что он съел, — подскажи, что записать еду можно в Дневнике или написав боту.
+Вопрос: «${q}»${RU_ONLY}
+Ответь ТОЛЬКО JSON: {"answer":"..."}` }], 700);
+  return { kind: "answer", text: String(j.answer || "").slice(0, 1500) };
+}
 
 /* --- разбор недели от ИИ --- */
 async function weekReview(env, uid, today) {
@@ -1060,6 +1095,7 @@ async function api(req, env, url, user, ctx) {
   if (p === "ai/recipe") {
     try { return json(await aiRecipe(env, user, body)); } catch (e) { return json({ error: String(e.message || e) }, 502); }
   }
+  if (p === "ai/assist") { try { return json(await aiAssist(env, user, body)); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "ai/menu") { try { const q = await menuQuota(env, user.id); if (q) return json({ error: q }, 429); const r = await aiMenu(env, user, body); await menuQuota(env, user.id, true); return json(r); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "off/search") return await offProxy(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(url.searchParams.get("q") || "")}&page_size=40&langs=ru,en&fields=${OFF_FIELDS}`, ctx);
   if (p.startsWith("off/product/")) return await offProxy(`${OFF}/api/v2/product/${encodeURIComponent(p.slice(12))}.json?fields=${OFF_FIELDS}`, ctx);
