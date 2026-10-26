@@ -195,6 +195,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
 .planhdr{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);font-weight:700;padding-top:8px}
 @media (max-width:420px){.tiles{grid-template-columns:repeat(2,1fr)}.sum{grid-template-columns:1fr;justify-items:center}.sum .kv{width:100%}}
 @media (prefers-reduced-motion:no-preference){.bar i,.path i{transition:width .4s ease}}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .tour{position:fixed;inset:0;z-index:70}
 .tour-hole{position:fixed;border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.55);transition:all .25s ease;pointer-events:none}
 .tour-box{position:fixed;left:16px;right:16px;max-width:460px;margin:0 auto;background:var(--surface);color:var(--fg);border-radius:16px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.25);display:flex;flex-direction:column;transition:top .25s ease}
@@ -226,6 +227,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
     <div id="noProfile" class="banner" hidden>Сначала заполни <button class="ghost" data-go="profile">профиль</button> — без него приложение не знает твою норму калорий.</div>
     <div class="card" id="summary"></div>
     <div class="card" id="coachNotes" hidden style="border-color:var(--accent)"></div>
+    <div class="banner small" id="cycleNote" hidden style="background:#FBEAF0;color:#5A2236;border-color:#F2C6D4"></div>
 
     <div class="card stack">
       <h2>Добавить продукт</h2>
@@ -246,6 +248,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <label class="labelbtn" id="aiWrap" hidden style="background:var(--accent-soft);color:var(--accent)">Фото еды — ИИ посчитает сам<input type="file" accept="image/*" capture="environment" id="aiFile" hidden></label>
       <button class="ghost" id="pasteShare" style="align-self:flex-start;padding-left:0">Вставить, что прислали</button>
       <div class="note" id="botHint" hidden style="margin:0">✍️ Можно и в чате с ботом: напиши «на обед 150 г гречки», скажи голосом или пришли фото тарелки — запишется сюда. <button class="ghost" id="botChat" style="padding:0;font-size:inherit">Открыть чат</button></div>
+      <div id="repeatWrap" hidden></div>
       <div id="dishWrap" hidden><div class="note" style="margin-bottom:6px">Мои блюда</div><div class="chips" id="dishChips"></div></div>
       <div id="recentWrap" hidden><div class="note" style="margin-bottom:6px">Недавние</div><div class="chips" id="recent"></div></div>
     </div>
@@ -289,6 +292,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       </div>
       <button class="primary" id="wAdd">Сохранить</button>
     </div>
+    <div class="card stack" id="cycleCard" hidden></div>
     <div class="card" id="wTable"></div>
   </section>
 
@@ -360,7 +364,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 30</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 32</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -752,8 +756,27 @@ function renderDiary(){
   // тренировки
   $("woList").innerHTML = day.workouts.length? day.workouts.map(w=>`<div class="item" style="grid-template-columns:1fr auto 28px"><div class="n">${esc(w.type)}<small class="num">${w.min} мин</small></div><div class="k">−${fmt(w.kcal)} ккал</div><button class="icon" data-wdel="${w.id}" aria-label="Удалить тренировку">✕</button></div>`).join("") : `<div class="note">Тренировок за день нет.</div>`;
   $("woSum").textContent = t.min? `${t.min} мин · ${fmt(t.burn)} ккал` : "";
-  updateMealSeg();
+  updateMealSeg(); renderRepeat();
 }
+/* ---- запись в одно касание: «как в прошлый раз» ---- */
+function lastMealDay(m,before){ for(let i=1;i<=14;i++){ const d=addDays(before,-i); const it=getDay(d).meals.filter(x=>x.meal===m); if(it.length) return {d,it}; } return null; }
+function renderRepeat(){
+  const el=$("repeatWrap"); if(!el) return;
+  const cur=getDay(curDate).meals.filter(x=>x.meal===meal);
+  const last=cur.length?null:lastMealDay(meal,curDate);
+  if(!last){ el.hidden=true; el.innerHTML=""; return; }
+  const kc=last.it.reduce((s,x)=>s+x.kcal*x.g/100,0), when=last.d===addDays(curDate,-1)?"вчера":human(last.d);
+  const names=last.it.map(x=>x.name).slice(0,3).join(", ")+(last.it.length>3?` и ещё ${last.it.length-3}`:"");
+  el.hidden=false;
+  el.innerHTML=`<button class="chip" data-repeat="${last.d}" style="width:100%;text-align:left;padding:10px 14px;line-height:1.35;border-radius:14px"><b>↻ ${meal} как ${when}</b> · ${fmt(kc)} ккал<br><span class="small muted">${esc(names)}</span></button>`;
+}
+document.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest("[data-repeat]");
+  if(b){ const src=getDay(b.dataset.repeat).meals.filter(x=>x.meal===meal); if(!src.length) return;
+    const day=clone(getDay(curDate)); src.forEach(x=>day.meals.push({...x,id:uidGen()})); putDay(curDate,day);
+    toast(`${meal}: добавлено ${src.length} ${plural(src.length,"продукт","продукта","продуктов")}`); renderDiary(); return; }
+  if(e.target.closest&&e.target.closest("#mealSeg [data-meal]")) setTimeout(renderRepeat,0);
+});
 function mac(name,v,target,col){
   const pct=target?Math.min(100,v/target*100):0;
   return `<div class="mac"><div class="t"><span>${name}</span><b>${fmt(v)}${target?" / "+target:""} г</b></div><div class="bar"><i style="width:${pct}%;background:${col}"></i></div></div>`;
@@ -1670,6 +1693,7 @@ function renderPlan(){
   const prevHas=Object.values(getWeek(addDays(menuWeek,-7)).days).some(a=>a&&a.length);
   const over=n&&t.kcal>n;
   let html=`<div class="daychips">${chips}</div>`;
+  if(typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai) html+=`<button class="primary" id="aiMenuBtn">✨ Составить меню на неделю с ИИ</button>`;
   if(weekEmpty && prevHas) html+=`<div class="banner row" style="justify-content:space-between"><span>На эту неделю меню пока нет.</span><button class="ghost" id="copyPrevWeek">Скопировать прошлую неделю</button></div>`;
   html+=`<div class="card"><div class="row" style="justify-content:space-between"><h2>${dowOf(menuDay)}, ${human(menuDay)}</h2><b class="num ${over?"neg":""}">${fmt(t.kcal)}${n?" / "+fmt(n):""} ккал</b></div>
     <div class="bar" style="margin-top:10px"><i style="width:${n?Math.min(100,t.kcal/n*100):0}%;background:${over?"var(--warn)":"var(--accent)"}"></i></div>
@@ -1711,6 +1735,7 @@ function openDishEditor(id){
   openSheet(`<div class="row" style="justify-content:space-between"><h2>${d?"Изменить блюдо":"Новое блюдо"}</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
     <div class="row"><label class="f" style="flex:3 1 180px">Название<input id="dName" value="${esc(draft.name)}" placeholder="Например, «Овсянка с бананом»"></label>
     <label class="f" style="flex:1 1 90px">Порций<input id="dPort" type="number" inputmode="numeric" min="1" value="${draft.portions}"></label></div>
+    <div class="stack" style="gap:6px"><span class="small muted">Подходит на (для «Идей»):</span><div class="chips" id="dMeals">${MEALS.map(m=>`<button class="chip" data-dmeal="${m}" aria-pressed="${(draft.meals||[]).includes(m)}">${m}</button>`).join("")}</div></div>
     <div class="note" style="margin:0">Добавляй продукты на всё блюдо целиком: ищи в справочнике или сканируй штрихкод / этикетку, потом впиши граммы. Крупы и мясо удобнее вносить в сухом или сыром виде.</div>
     <div id="dIng"></div>
     <div id="dPk" class="stack" style="gap:10px"></div>
@@ -1719,6 +1744,7 @@ function openDishEditor(id){
     <div class="row"><button class="grow" data-close>Отмена</button><button class="primary grow" id="dSave">Сохранить блюдо</button></div>`);
   mountPicker($("dPk"),{dishes:false,addLabel:"Добавить ингредиент",onAdd:(f,g)=>{ draft.ing.push({name:f.name,g,kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c)}); drawDraft(); }});
   $("dPort").oninput=drawDraft;
+  $("dMeals").onclick=e=>{ const b=e.target.closest("[data-dmeal]"); if(!b) return; const m=b.dataset.dmeal, cur=new Set(draft.meals||[]); cur.has(m)?cur.delete(m):cur.add(m); draft.meals=MEALS.filter(x=>cur.has(x)); b.setAttribute("aria-pressed",String(cur.has(m))); };
   $("dIng").addEventListener("change",e=>{ const i=e.target.dataset.ig; if(i==null) return; const v=num(e.target.value); if(v>0){ draft.ing[+i].g=r1(v); drawDraft(); } });
   $("dIng").addEventListener("click",e=>{ const b=e.target.closest("[data-idel]"); if(b){ draft.ing.splice(+b.dataset.idel,1); drawDraft(); } });
   $("dSave").onclick=()=>{
@@ -1741,6 +1767,42 @@ function drawDraft(){
     <span>Одна порция</span><b>${fmt(f.tot.kcal/f.portions)} ккал · ${fmt(f.portionG)} г</b>
     <span>БЖУ порции</span><b>${fmt(f.tot.p/f.portions)} / ${fmt(f.tot.f/f.portions)} / ${fmt(f.tot.c/f.portions)} г</b></div></div>` : "";
 }
+/* ---------- меню на неделю от ИИ ---------- */
+function aiMenuEntry(m){
+  const tot={g:0,kcal:0,p:0,f:0,c:0}; m.items.forEach(i=>{ const k=i.g/100; tot.g+=i.g; tot.kcal+=i.kcal*k; tot.p+=i.p*k; tot.f+=i.f*k; tot.c+=i.c*k; });
+  const per=x=>tot.g?r1(x/tot.g*100):0;
+  return {id:uidGen(),meal:m.meal,name:m.name,g:r1(tot.g),kcal:per(tot.kcal),p:per(tot.p),f:per(tot.f),c:per(tot.c),ing:m.items.map(i=>({name:i.name,g:i.g,kcal:i.kcal,p:i.p,f:i.f,c:i.c})),totalG:r1(tot.g),portionG:r1(tot.g),ai:true};
+}
+function openAiMenu(){
+  const c=calc(); if(!c){ toast("Сначала заполни профиль — нужна норма калорий"); go("profile"); return; }
+  const pr=Store.get("aiMenuPrefs")||{}, w=getWeek(menuWeek), filled=Object.values(w.days).some(a=>a&&a.length), pk=pantry();
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Меню на неделю с ИИ</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <p class="note" style="margin:0">Под твою норму ${fmt(c.kcal)} ккал и БЖУ. Обеды и ужины повторяются по 2 дня, чтобы готовить реже. Список покупок соберётся сам.</p>
+    <div class="seg" id="amMeals"><button data-am="4" aria-pressed="${pr.meals!==3}">4 приёма</button><button data-am="3" aria-pressed="${pr.meals===3}">3 приёма, без перекуса</button></div>
+    <label class="f">Не ем / аллергия<input id="amEx" value="${esc(pr.exclude||"")}" placeholder="например: рыба, грибы, свинина"></label>
+    <label class="row small" style="gap:8px"><input type="checkbox" id="amQuick" style="width:auto" ${pr.quick?"checked":""}><span>Только простые блюда, до 30 минут</span></label>
+    ${pk.length?`<label class="row small" style="gap:8px"><input type="checkbox" id="amPantry" style="width:auto" checked><span>Использовать то, что есть дома (${pk.length})</span></label>`:""}
+    ${filled?`<div class="seg" id="amMode"><button data-amm="empty" aria-pressed="true">Только пустые дни</button><button data-amm="all" aria-pressed="false">Заменить всю неделю</button></div>`:""}
+    <div class="note" id="amMsg"></div>
+    <button class="primary" id="amGo">Составить меню</button>`);
+  let meals=pr.meals===3?3:4, mode="empty";
+  $("amMeals").onclick=e=>{ const b=e.target.closest("[data-am]"); if(!b) return; meals=+b.dataset.am; document.querySelectorAll("#amMeals button").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); };
+  if($("amMode")) $("amMode").onclick=e=>{ const b=e.target.closest("[data-amm]"); if(!b) return; mode=b.dataset.amm; document.querySelectorAll("#amMode button").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); };
+  $("amGo").onclick=async()=>{
+    const ex=$("amEx").value.trim(), quick=$("amQuick").checked, usePk=$("amPantry")?$("amPantry").checked:false;
+    Store.set("aiMenuPrefs",{meals,exclude:ex,quick});
+    const w0=getWeek(menuWeek), dates=[0,1,2,3,4,5,6].map(i=>addDays(menuWeek,i)).filter(d=>mode==="all"||!(w0.days[d]&&w0.days[d].length));
+    if(!dates.length){ $("amMsg").textContent="Все дни уже заполнены — выбери «Заменить всю неделю»."; return; }
+    $("amGo").disabled=true; $("amMsg").textContent="ИИ составляет меню… это займёт 20–60 секунд.";
+    try{
+      const r=await sapi("ai/menu",{norm:c.kcal,p:c.p,f:c.f,c:c.c,meals,exclude:ex,quick,pantry:usePk?pk:[],dishes:dishes().map(d=>d.name),days:dates.length});
+      const w=getWeek(menuWeek); let n=0;
+      dates.forEach((d,i)=>{ const day=r.days[i]; if(!day) return; w.days[d]=day.meals.map(aiMenuEntry); n+=w.days[d].length; });
+      putWeek(menuWeek,w); closeSheet2(); toast(`Готово: ${n} ${plural(n,"блюдо","блюда","блюд")} на ${dates.length} ${plural(dates.length,"день","дня","дней")}. Список покупок — во вкладке «Покупки»`); renderMenu();
+    }catch(e){ $("amGo").disabled=false; $("amMsg").textContent="Не получилось: "+errText(e); }
+  };
+}
+document.addEventListener("click",e=>{ if(e.target.closest&&e.target.closest("#aiMenuBtn")) openAiMenu(); });
 function shopItems(){
   const w=getWeek(menuWeek), from=(shopFromToday && mondayOf(today())===menuWeek)? today() : menuWeek, map=new Map(), cooks=new Map();
   const addItem=(name,g)=>{ let conv=false; const r=RAW_MAP[name]; if(r){ name=r[0]; g*=r[1]; conv=true; } const k=norm(name), cur=map.get(k)||{name,g:0,conv:false}; cur.g+=g; cur.conv=cur.conv||conv; map.set(k,cur); };
@@ -1822,8 +1884,24 @@ const pantry = () => (Store.get("pantry")?.items)||[];
 const wordKeys = s => norm(s).split(/[\s,()]+/).filter(Boolean).map(w=>w.length<=4?w.slice(0,3):w.slice(0,4));
 const ingKey = name => wordKeys(name)[0];
 function haveIng(name, pk){ const k=ingKey(name); return pk.some(keys=>keys.includes(k)); }
+/* к каким приёмам пищи подходит своё блюдо: выбор в редакторе → как его ели → по названию */
+function dishMeals(d){
+  if(d.meals&&d.meals.length) return d.meals;
+  const cnt={}; const nm=norm(d.name);
+  Object.keys(Store.docs).forEach(k=>{
+    if(k.startsWith("d-")) (Store.docs[k]?.meals||[]).forEach(x=>{ if(norm(x.name)===nm) cnt[x.meal]=(cnt[x.meal]||0)+1; });
+    else if(k.startsWith("w-")) Object.values(Store.docs[k]?.days||{}).forEach(a=>(a||[]).forEach(x=>{ if(norm(x.name)===nm) cnt[x.meal]=(cnt[x.meal]||0)+1; }));
+  });
+  const mx=Math.max(0,...Object.values(cnt));
+  if(mx) return MEALS.filter(m=>(cnt[m]||0)>=Math.max(1,mx*0.3));
+  if(/суп|борщ|щи\b|солянк|рассольник|уха|харчо|плов|рагу|гуляш|котлет|тефтел|паста|макарон|лазань|пицц|запеканк.*(мяс|куриц)|жаркое|голубц|пельмен|вареник/.test(nm)) return ["Обед","Ужин"];
+  if(/каша|овсян|гранол|мюсли|сырник|оладь|блин|омлет|яичниц|скрэмбл|тост|бутерброд|творожн|запеканк/.test(nm)) return ["Завтрак"];
+  if(/салат|боул|рыба|курица|индейк|говядин|стейк|овощ/.test(nm)) return ["Обед","Ужин"];
+  if(/смузи|десерт|батончик|печень|кекс|маффин|йогурт|фрукт|орех|пудинг|желе/.test(nm)) return ["Перекус"];
+  return [];
+}
 function recipeList(){
-  const own=dishes().filter(d=>d.ing&&d.ing.length).map(d=>({n:d.name,m:null,p:d.portions||1,i:d.ing.map(x=>[x.name,x.g]),own:true,dish:d}));
+  const own=dishes().filter(d=>d.ing&&d.ing.length).map(d=>({n:d.name,m:dishMeals(d),p:d.portions||1,i:d.ing.map(x=>[x.name,x.g]),own:true,dish:d}));
   const ownNames=new Set(own.map(o=>norm(o.n)));
   return own.concat(RECIPES.filter(r=>!ownNames.has(norm(r.n))));
 }
@@ -1845,7 +1923,7 @@ function renderIdeas(){
     const f=dishFood(recipeDish(r));
     return {r,got,miss,main,kcal:f.tot.kcal/f.portions,portionG:f.portionG};
   });
-  if(ideaMeal!=="Все") list=list.filter(x=>x.r.m===ideaMeal || (x.r.own && ideaMeal));
+  if(ideaMeal!=="Все") list=list.filter(x=>x.r.own ? x.r.m.includes(ideaMeal) : x.r.m===ideaMeal);
   if(has){ list=list.filter(x=>x.got.length>0).sort((a,b)=>(a.miss.length-b.miss.length)||(b.got.length-a.got.length)); }
   const chips=pantry().map((p,i)=>`<button class="chip" data-pantdel="${i}" aria-label="Убрать ${esc(p)}">${esc(p)} ✕</button>`).join("");
   $("menuIdeas").innerHTML=`<div class="card stack">
@@ -1858,7 +1936,7 @@ function renderIdeas(){
       const status = !has? "" : x.miss.length===0 ? `<span class="tag">всё есть</span>` : `<span class="tag warn">не хватает ${x.miss.length}</span>`;
       return `<div class="card stack" style="gap:8px">
         <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0"><h2 style="font-size:15px">${esc(r.n)}</h2>
-          <div class="small muted">${r.own?"моё блюдо":r.m} · ${r.p} ${r.p===1?"порция":r.p<5?"порции":"порций"}</div></div>
+          <div class="small muted">${r.own?"моё блюдо"+(r.m.length?" · "+r.m.join(", ").toLowerCase():""):r.m} · ${r.p} ${r.p===1?"порция":r.p<5?"порции":"порций"}</div></div>
           <div style="text-align:right"><b class="num" style="white-space:nowrap">${fmt(x.kcal)} ккал</b><div class="small muted">на порцию</div></div></div>
         ${status?`<div>${status}</div>`:""}
         ${has&&x.got.length?`<div class="small"><b>Есть:</b> ${x.got.map(i=>esc(i[0])).join(", ")}</div>`:""}
@@ -2597,6 +2675,7 @@ const TIPS={
   ],
   weight:[
     ["#wKg","Взвешивание","Раз в неделю утром натощак записывай вес. Талию — по желанию: она часто уходит, даже когда вес стоит."],
+    ["#cycleCard","Цикл","Отмечай первый день месячных — приложение объяснит скачки веса из-за воды и отметит эти дни на графике."],
     ["#wTable","История","Все взвешивания и изменения. Вес из «Здоровья» и умных весов тоже попадает сюда."]
   ],
   foods:[
@@ -2828,6 +2907,84 @@ function renderCoachNotes(){
     else if(b.dataset.trremove){ if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Точно убрать? Нажми ещё раз"; return; } try{ await sapi("trainer/remove",{client:b.dataset.trremove}); trState.clients=trState.clients.filter(x=>x.uid!==b.dataset.trremove); renderCoachCards(); }catch(err){ toast(errText(err)); } }
     else if(b.dataset.coachleave){ if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="Точно закрыть? Нажми ещё раз"; return; } try{ const r=await sapi("coach/leave",{trainer:b.dataset.coachleave}); coachState={trainers:r.trainers,comments:r.comments}; toast("Доступ закрыт"); renderCoachCards(); renderCoachNotes(); }catch(err){ toast(errText(err)); } }
   });
+})();
+
+/* ================= ЦИКЛ ================= */
+const isWoman=()=>{ const p=profile(); return !!p && p.sex!=="Мужской"; };
+const cycleStarts=()=>((Store.get("cycle")?.starts)||[]).slice().sort();
+function cycleInfo(on){
+  const st=cycleStarts(); on=on||today();
+  const past=st.filter(d=>d<=on); if(!past.length) return null;
+  const lens=[]; for(let i=1;i<st.length;i++){ const L=Math.round((parseD(st[i])-parseD(st[i-1]))/864e5); if(L>=20&&L<=45) lens.push(L); }
+  const avg=lens.length?Math.round(lens.slice(-6).reduce((a,b)=>a+b,0)/Math.min(6,lens.length)):28;
+  const last=past[past.length-1], day=Math.round((parseD(on)-parseD(last))/864e5)+1;
+  let next=addDays(last,avg); while(next<=on && day>avg+10) next=addDays(next,avg);
+  const toNext=Math.round((parseD(next)-parseD(on))/864e5);
+  const phase= day<=5?"period" : (toNext>=1&&toNext<=6)?"pms" : "normal";
+  return {last,day,avg,next,toNext,phase,known:lens.length};
+}
+function setCycleStart(d){
+  const st=cycleStarts().filter(x=>Math.abs((parseD(x)-parseD(d))/864e5)>10); st.push(d);
+  Store.set("cycle",{starts:st.sort().slice(-24)});
+}
+function cycleNoteHtml(){
+  if(!isWoman()||curDate!==today()) return "";
+  const ci=cycleInfo();
+  if(!ci) return "";
+  if(ci.phase==="pms") return `🌸 <b>Через ${ci.toNext} ${plural(ci.toNext,"день","дня","дней")} — месячные</b> (примерно). В эти дни вес может подрасти на 0,5–2 кг: это задержка воды, не жир. Не урезай норму — после начала цикла всё уйдёт само. <button class="ghost small" data-cyclestart="1" style="padding:0">Уже начались</button>`;
+  if(ci.phase==="period") return `🌸 <b>${ci.day}-й день цикла.</b> Вес может быть выше обычного из-за воды — оценивай прогресс по неделе, а не по дню.`;
+  if(ci.toNext<=0) return `🌸 По прогнозу месячные должны были начаться ${ci.toNext===0?"сегодня":`${-ci.toNext} ${plural(-ci.toNext,"день","дня","дней")} назад`}. <button class="ghost small" data-cyclestart="1" style="padding:0">Отметить: начались сегодня</button>`;
+  return "";
+}
+function renderCycleNote(){ const el=$("cycleNote"); if(!el) return; const h=cycleNoteHtml(); el.hidden=!h; el.innerHTML=h; }
+function renderCycleCard(){
+  const el=$("cycleCard"); if(!el) return;
+  if(!isWoman()){ el.hidden=true; return; }
+  el.hidden=false;
+  const ci=cycleInfo(), st=cycleStarts().slice(-6).reverse();
+  el.innerHTML=`<div class="row" style="justify-content:space-between"><h2>Цикл</h2>${ci?`<span class="small muted num">${ci.day}-й день · средний ${ci.avg} дн.</span>`:""}</div>
+    <p class="note" style="margin:0">${ci?`Следующие примерно ${human(ci.next)}${ci.toNext>0?` — через ${ci.toNext} ${plural(ci.toNext,"день","дня","дней")}`:""}. За несколько дней до и в первые дни вес может временно расти из-за воды — на графике эти дни отмечены розовым.`:"Отмечай первый день месячных — приложение будет объяснять скачки веса из-за воды и отмечать эти дни на графике. Можно и написать боту «начались»."}</p>
+    <div class="row"><button class="primary grow" data-cyclestart="1">Начались сегодня</button><input type="date" id="cyDate" aria-label="Другая дата" style="max-width:170px"><button id="cyAdd">Отметить</button></div>
+    ${st.length?`<div class="small muted">Отмечено: ${st.map(d=>`${shortD(d)} <button class="icon" data-cycledel="${d}" aria-label="Удалить отметку ${shortD(d)}" style="width:28px;height:28px">✕</button>`).join(" ")}</div>`:""}`;
+}
+/* пометки цикла на графике веса: вернуть отрезки [от, до] для розовой подложки */
+function cycleBands(t0,t1){
+  if(!isWoman()) return [];
+  const st=cycleStarts(); if(!st.length) return [];
+  const out=[]; const ci=cycleInfo(); const all=st.slice(); if(ci&&ci.next) all.push(ci.next);
+  all.forEach(d=>{ const a=parseD(addDays(d,-5)).getTime(), b=parseD(addDays(d,3)).getTime(); if(b>=t0&&a<=t1) out.push([Math.max(a,t0),Math.min(b,t1)]); });
+  return out;
+}
+(function hookCycle(){
+  const _rd=renderDiary; renderDiary=function(){ _rd(); try{ renderCycleNote(); }catch(e){} };
+  const _rw=renderWeight; renderWeight=function(){ _rw(); try{ renderCycleCard(); }catch(e){} };
+  const _wc=weightChart; weightChart=function(w,p){
+    let svg=_wc(w,p); if(!/^<svg/.test(svg)) return svg;
+    try{
+      const pts=w.slice(); if(p.start&&(!w.length||p.start<w[0].date)) pts.unshift({date:p.start,w:p.w0});
+      const ds=pts.map(x=>parseD(x.date).getTime()); const t0=Math.min(...ds), t1=Math.max(...ds);
+      const bands=cycleBands(t0,t1); if(!bands.length) return svg;
+      const W=400,H=200,pl=30,pr=12,pt=12,pb=24, X=t=>pl+(t-t0)/((t1-t0)||1)*(W-pl-pr);
+      const rects=bands.map(([a,b])=>`<rect x="${X(a).toFixed(1)}" y="${pt}" width="${Math.max(3,X(b)-X(a)).toFixed(1)}" height="${H-pt-pb}" fill="#E8789A" fill-opacity=".14"><title>Вода перед месячными и в первые дни</title></rect>`).join("");
+      svg=svg.replace(/(<svg[^>]*>)/,`$1${rects}`);
+    }catch(e){}
+    return svg;
+  };
+  document.addEventListener("click",e=>{
+    const b=e.target.closest&&e.target.closest("button"); if(!b) return;
+    if(b.dataset.cyclestart){ setCycleStart(today()); toast("Отмечено 🌸 Учту в графике и подсказках"); renderAll(); }
+    else if(b.id==="cyAdd"){ const d=$("cyDate").value; if(!d){ toast("Выбери дату"); return; } if(d>today()){ toast("Дата в будущем"); return; } setCycleStart(d); toast("Отмечено 🌸"); renderAll(); }
+    else if(b.dataset.cycledel){ Store.set("cycle",{starts:cycleStarts().filter(x=>x!==b.dataset.cycledel)}); renderAll(); }
+  });
+  // при записи веса: объяснить рост в «водные» дни
+  const _st=Store.set.bind(Store);
+  Store.set=function(k,v,q){
+    let msg=null;
+    try{ if(k==="weights"&&isWoman()){ const old=weights(), nw=((v&&v.entries)||[]).slice().sort((a,b)=>a.date<b.date?-1:1), last=nw[nw.length-1], prev=nw[nw.length-2];
+      if(last&&prev&&!old.some(x=>x.date===last.date&&x.w===last.w)&&last.w>prev.w){ const ci=cycleInfo(last.date); if(ci&&(ci.phase==="pms"||ci.phase==="period")) msg=`Вес +${fmt(last.w-prev.w,1)} кг — скорее всего, это вода из-за цикла, не жир 🌸 Через несколько дней уйдёт.`; } } }catch(e){}
+    _st(k,v,q);
+    if(msg) setTimeout(()=>toast(msg),2300);
+  };
 })();
 
 function bindMenu(){
