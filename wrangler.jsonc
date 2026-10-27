@@ -10,5 +10,5 @@
   "ai": { "binding": "AI" },
   "triggers": { "crons": ["*/30 * * * *"] },
   "vars": { "APP_URL": "https://gjznmp6jcj-alt.github.io/Dnevnik/" },
-  "observability": { "enabled": true }
+  "observability": { "enabled": false }
 }
