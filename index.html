@@ -3380,13 +3380,14 @@ const CONSENT_HTML=`
   <p class="small" style="margin:0">Чтобы считать норму калорий, вести дневник, работать с ботом, присылать напоминания и итоги, показывать прогресс и давать доступ семье и тренеру — только тем, кого ты пригласишь сама.</p>
   <div class="cs-sec">Где и кто обрабатывает</div>
   <ul class="small">
-    <li>Данные хранятся на сервере приложения у Cloudflare — <b>за пределами России</b>, и в облаке Telegram (для мини-приложения).</li>
+    <li>Данные хранятся на сервере приложения (хостинг Cloudflare) и в облаке Telegram (для мини-приложения).</li>
     <li>Сообщения боту проходят через Telegram.</li>
-    <li>Для фото еды, разбора текста, советов, меню и рецептов текст и фото <b>без имени и ID</b> отправляются в сервис ИИ Anthropic (США). Голосовые расшифровывает Cloudflare.</li>
+    <li>Для фото еды, разбора текста, советов, меню и рецептов текст и фото <b>без имени и ID</b> отправляются в сервис ИИ Anthropic. Голосовые расшифровывает Cloudflare.</li>
     <li>По штрихкоду в базу Open Food Facts уходит только номер штрихкода.</li>
   </ul>
   <div class="cs-sec">Сроки и твои права</div>
-  <p class="small" style="margin:0">Храним, пока ты пользуешься дневником. Удалить всё можно в любой момент: «Профиль» → «Удалить мои данные» или командой /delete в боте. Согласие можно отозвать в «Профиле».</p>
+  <p class="small" style="margin:0">Данные хранятся, пока ты сама их не удалишь, — автоматически они не удаляются. Исключения: итоги дня для напоминаний хранятся 45 дней, файлы для скачивания — 1 час. Удалить всё можно в любой момент: «Профиль» → «Удалить мои данные» или командой /delete в боте; данные стираются и из резервных копий. После удаления 180 дней хранится только отметка (ID и дата удаления), чтобы старые копии на других устройствах не восстановили данные.</p>
+  <p class="small" style="margin:0">Отзыв согласия останавливает обработку данных на сервере, но не удаляет то, что уже сохранено, — для этого есть отдельная кнопка удаления.</p>
   <div class="cs-sec">Если не принять</div>
   <p class="small" style="margin:0">Дневник будет работать <b>только на этом телефоне</b>: записи, поиск продуктов, штрихкоды, этикетки, меню вручную, покупки, вес, цикл. <b>Отключатся:</b> бот, синхронизация с Telegram и другими устройствами, фото еды и помощник, меню от ИИ, рецепт по ссылке, семья, тренер, напоминания, «Здоровье», вход в приложении на экране «Домой».</p>`;
 function openConsent(first){
@@ -3406,11 +3407,30 @@ function openConsent(first){
   </div></div>`;
   $("csYes").onclick=()=>{ const was=consentOk(); consentSave(true); r.innerHTML=""; if(!was){ toast("Спасибо! Включаю все функции…"); setTimeout(()=>location.reload(),700); } };
   $("csNo").onclick=async()=>{
-    const was=consentOk();
-    if(was){ $("csMsg").textContent="Отзываю…"; try{ if(serverReady()) await sapiOnce("consent",{accept:false,v:CONSENT_V}); }catch(e){} }
+    const was=consentOk(), msg=$("csMsg"), btns=[$("csYes"),$("csNo")];
+    if(was){
+      // согласие было дано: сначала отключаем обработку на сервере и только при успехе — на телефоне
+      const c=consentState(), onServer=!!(c&&c.sent)||serverReady();
+      if(onServer){
+        btns.forEach(b=>b.disabled=true); msg.style.color=""; msg.textContent="Отзываю согласие на сервере…";
+        let done=false, err="";
+        try{ const res=await sapiOnce("consent",{accept:false,v:CONSENT_V}); if(res&&res.wiped){ r.innerHTML=""; await applyRemoteWipe(res.wiped); return; } done=!!(res&&res.ok&&res.consent&&res.consent.ok===false); if(!done) err="сервер не подтвердил отзыв"; }
+        catch(e){ err=errText(e); if(e&&e.code===403){ done=true; } }   // 403 «нет согласия» — на сервере его уже нет
+        btns.forEach(b=>b.disabled=false);
+        if(!done){
+          msg.style.color="var(--warn)";
+          msg.textContent="Не удалось отозвать согласие: "+err+". Согласие пока действует, сервер продолжает обрабатывать данные. Проверь интернет (в России — VPN) и нажми «Отозвать согласие» ещё раз.";
+          return;
+        }
+      }
+      consentSave(false); r.innerHTML="";
+      toast(onServer?"Согласие отозвано: сервер больше не обрабатывает твои данные":"Согласие отозвано. Дневник работает только на этом телефоне");
+      setTimeout(()=>location.reload(),1200);
+      return;
+    }
     consentSave(false); r.innerHTML="";
     toast("Хорошо. Дневник работает только на этом телефоне");
-    if(was) setTimeout(()=>location.reload(),900); else renderAll();
+    renderAll();
   };
   const cl=$("csClose"); if(cl) cl.onclick=()=>{ r.innerHTML=""; };
 }
