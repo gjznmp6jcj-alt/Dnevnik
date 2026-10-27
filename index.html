@@ -610,6 +610,7 @@ const Store = {
       }
       const hadProfile=!!profile();
       for(const k in remote){ if(!this.dirty.has(k)) this.docs[k]=remote[k]; }
+      if(typeof CYCLE_ON!=="undefined"&&!CYCLE_ON&&remote.cycle!==undefined){ delete this.docs.cycle; this.dirty.delete("cycle"); this._push("cycle"); }   // данные цикла удалены — стираем и из облака Telegram
       this._saveLocal();
       [...this.dirty].forEach(k=>this._push(k));
       this.synced=true; setSyncMode(); fillProfileForm();
@@ -982,7 +983,7 @@ function renderProgress(){
       <div class="row" style="justify-content:space-between"><h2>Коридор веса</h2><b class="num">${fmt(cur,1)} кг</b></div>
       <div class="path" style="position:relative;background:var(--surface2)"><i style="position:absolute;left:${a*100}%;width:${(b-a)*100}%;background:var(--accent-soft)"></i><span style="position:absolute;left:calc(${pos*100}% - 7px);top:-3px;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--surface)"></span></div>
       <div class="row small muted num" style="justify-content:space-between"><span>${fmt(c.band[0],1)} кг</span><span>держу ${fmt(p.goal,1)} кг</span><span>${fmt(c.band[1],1)} кг</span></div>
-      <p class="note" style="margin:0">Колебания ±${fmt(MAINT_BAND,1)} кг — это нормально: вода, соль, цикл. Если вес неделю держится выше коридора — немного урежь порции или добавь шагов.</p>
+      <p class="note" style="margin:0">Колебания ±${fmt(MAINT_BAND,1)} кг — это нормально: вода, соль, гормоны. Если вес неделю держится выше коридора — немного урежь порции или добавь шагов.</p>
     </div>`; })():`<div class="card stack">
       <div class="row" style="justify-content:space-between"><h2>Путь к цели</h2><b class="num">${fmt(path*100)}%</b></div>
       <div class="path"><i style="width:${path*100}%"></i></div>
@@ -2892,7 +2893,6 @@ const TIPS={
   ],
   weight:[
     ["#wKg","Взвешивание","Раз в неделю утром натощак записывай вес. Талию — по желанию: она часто уходит, даже когда вес стоит."],
-    ["#cycleCard","Цикл","Отмечай первый день месячных — приложение объяснит скачки веса из-за воды и отметит эти дни на графике."],
     ["#wTable","История","Все взвешивания и изменения. Вес из «Здоровья» и умных весов тоже попадает сюда."]
   ],
   foods:[
@@ -3129,6 +3129,9 @@ function renderCoachNotes(){
 
 /* ================= ЦИКЛ ================= */
 const isWoman=()=>{ const p=profile(); return !!p && p.sex!=="Мужской"; };
+// Учёт цикла временно скрыт: это самые чувствительные данные. Включить обратно — CYCLE_ON=true (и в worker.js).
+const CYCLE_ON=false;
+const cycleOn=()=>CYCLE_ON&&isWoman();
 const cycleStarts=()=>((Store.get("cycle")?.starts)||[]).slice().sort();
 function cycleInfo(on){
   const st=cycleStarts(); on=on||today();
@@ -3146,7 +3149,7 @@ function setCycleStart(d){
   Store.set("cycle",{starts:st.sort().slice(-24)});
 }
 function cycleNoteHtml(){
-  if(!isWoman()||curDate!==today()) return "";
+  if(!cycleOn()||curDate!==today()) return "";
   const ci=cycleInfo();
   if(!ci) return "";
   if(ci.phase==="pms") return `🌸 <b>Через ${ci.toNext} ${plural(ci.toNext,"день","дня","дней")} — месячные</b> (примерно). В эти дни вес может подрасти на 0,5–2 кг: это задержка воды, не жир. Не урезай норму — после начала цикла всё уйдёт само. <button class="ghost small" data-cyclestart="1" style="padding:0">Уже начались</button>`;
@@ -3157,7 +3160,7 @@ function cycleNoteHtml(){
 function renderCycleNote(){ const el=$("cycleNote"); if(!el) return; const h=cycleNoteHtml(); el.hidden=!h; el.innerHTML=h; }
 function renderCycleCard(){
   const el=$("cycleCard"); if(!el) return;
-  if(!isWoman()){ el.hidden=true; return; }
+  if(!cycleOn()){ el.hidden=true; return; }
   el.hidden=false;
   const ci=cycleInfo(), st=cycleStarts().slice(-6).reverse();
   el.innerHTML=`<div class="row" style="justify-content:space-between"><h2>Цикл</h2>${ci?`<span class="small muted num">${ci.day}-й день · средний ${ci.avg} дн.</span>`:""}</div>
@@ -3167,7 +3170,7 @@ function renderCycleCard(){
 }
 /* пометки цикла на графике веса: вернуть отрезки [от, до] для розовой подложки */
 function cycleBands(t0,t1){
-  if(!isWoman()) return [];
+  if(!cycleOn()) return [];
   const st=cycleStarts(); if(!st.length) return [];
   const out=[]; const ci=cycleInfo(); const all=st.slice(); if(ci&&ci.next) all.push(ci.next);
   all.forEach(d=>{ const a=parseD(addDays(d,-5)).getTime(), b=parseD(addDays(d,3)).getTime(); if(b>=t0&&a<=t1) out.push([Math.max(a,t0),Math.min(b,t1)]); });
@@ -3198,7 +3201,7 @@ function cycleBands(t0,t1){
   const _st=Store.set.bind(Store);
   Store.set=function(k,v,q){
     let msg=null;
-    try{ if(k==="weights"&&isWoman()){ const old=weights(), nw=((v&&v.entries)||[]).slice().sort((a,b)=>a.date<b.date?-1:1), last=nw[nw.length-1], prev=nw[nw.length-2];
+    try{ if(k==="weights"&&cycleOn()){ const old=weights(), nw=((v&&v.entries)||[]).slice().sort((a,b)=>a.date<b.date?-1:1), last=nw[nw.length-1], prev=nw[nw.length-2];
       if(last&&prev&&!old.some(x=>x.date===last.date&&x.w===last.w)&&last.w>prev.w){ const ci=cycleInfo(last.date); if(ci&&(ci.phase==="pms"||ci.phase==="period")) msg=`Вес +${fmt(last.w-prev.w,1)} кг — скорее всего, это вода из-за цикла, не жир 🌸 Через несколько дней уйдёт.`; } } }catch(e){}
     _st(k,v,q);
     if(msg) setTimeout(()=>toast(msg),2300);
@@ -3373,7 +3376,7 @@ const CONSENT_HTML=`
   <ul class="small">
     <li>Telegram ID и имя.</li>
     <li>Дневник питания, вес и замеры, профиль (пол, возраст, рост, цель), свои блюда, меню и покупки.</li>
-    <li><b>Сведения о здоровье:</b> вес, питание, даты менструального цикла, шаги и активность из «Здоровья».</li>
+    <li><b>Сведения о здоровье:</b> вес, питание, шаги и активность из «Здоровья».</li>
     <li>Настройки напоминаний, семья и тренер — если ими пользуешься.</li>
   </ul>
   <div class="cs-sec">Зачем</div>
@@ -3384,13 +3387,13 @@ const CONSENT_HTML=`
   <p class="small" style="margin:0">Данные хранятся, пока ты сама их не удалишь, — автоматически они не удаляются. Исключения: итоги дня для напоминаний хранятся 45 дней, файлы для скачивания — 1 час. Удалить всё можно в любой момент: «Профиль» → «Удалить мои данные» или командой /delete в боте; данные стираются и из резервных копий. После удаления 180 дней хранится только отметка (ID и дата удаления), чтобы старые копии на других устройствах не восстановили данные.</p>
   <p class="small" style="margin:0">Отзыв согласия останавливает обработку данных на сервере, но не удаляет то, что уже сохранено, — для этого есть отдельная кнопка удаления.</p>
   <div class="cs-sec">Если не принять</div>
-  <p class="small" style="margin:0">Дневник будет работать <b>только на этом телефоне</b>: записи, поиск продуктов, штрихкоды, этикетки, меню вручную, покупки, вес, цикл. <b>Отключатся:</b> бот, синхронизация с Telegram и другими устройствами, фото еды и помощник, меню от ИИ, рецепт по ссылке, семья, тренер, напоминания, «Здоровье», вход в приложении на экране «Домой».</p>`;
+  <p class="small" style="margin:0">Дневник будет работать <b>только на этом телефоне</b>: записи, поиск продуктов, штрихкоды, этикетки, меню вручную, покупки, вес. <b>Отключатся:</b> бот, синхронизация с Telegram и другими устройствами, фото еды и помощник, меню от ИИ, рецепт по ссылке, семья, тренер, напоминания, «Здоровье», вход в приложении на экране «Домой».</p>`;
 function openConsent(first){
   let r=$("csRoot"); if(!r){ r=document.createElement("div"); r.id="csRoot"; document.body.appendChild(r); }
   const c=consentState();
   r.innerHTML=`<div class="cs-bg" role="dialog" aria-modal="true" aria-label="Согласие на обработку данных"><div class="cs-box">
     <h2>Согласие на обработку данных</h2>
-    <p class="small" style="margin:0">Чтобы дневник считал норму, хранил записи и работал с ботом, нужно твоё согласие на обработку персональных данных, в том числе сведений о здоровье: вес, питание, цикл, активность.</p>
+    <p class="small" style="margin:0">Чтобы дневник считал норму, хранил записи и работал с ботом, нужно твоё согласие на обработку персональных данных, в том числе сведений о здоровье: вес, питание, активность.</p>
     <p class="small" style="margin:0">Данные хранятся на защищённых серверах и могут передаваться сервисам, которые обеспечивают работу приложения (хостинг, Telegram, распознавание фото и текста). Отозвать согласие и удалить данные можно в любой момент в «Профиле».</p>
     <p class="small" style="margin:0">Без согласия дневник будет работать только на этом телефоне, а бот, синхронизация, ИИ-функции, семья, тренер и напоминания будут отключены.</p>
     <details class="small"><summary style="cursor:pointer;color:var(--accent);font-weight:600">Подробнее: какие данные и кто обрабатывает</summary><div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">${CONSENT_HTML}</div></details>
@@ -3471,7 +3474,7 @@ async function applyRemoteWipe(ts){
 }
 function openDeleteAccount(){
   openSheet(`<div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Удалить все данные?</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
-    <p class="small" style="margin:0">Будут удалены: дневник питания, вес и замеры, меню и покупки, свои блюда и продукты, цикл, настройки и напоминания, твои записи в ленте семьи и комментарии, если ты тренер. Ты выйдешь из семьи, тренер потеряет доступ.${typeof serverReady==="function"&&serverReady()?" Данные сотрутся на сервере и в резервных копиях, а копии на других устройствах и в Telegram — при их следующем открытии.":""}</p>
+    <p class="small" style="margin:0">Будут удалены: дневник питания, вес и замеры, меню и покупки, свои блюда и продукты, настройки и напоминания, твои записи в ленте семьи и комментарии, если ты тренер. Ты выйдешь из семьи, тренер потеряет доступ.${typeof serverReady==="function"&&serverReady()?" Данные сотрутся на сервере и в резервных копиях, а копии на других устройствах и в Telegram — при их следующем открытии.":""}</p>
     <p class="note" style="margin:0">Переписку с ботом Telegram хранит сам — её можно удалить, удалив чат с ботом.</p>
     <p class="small" style="margin:0"><b>Вернуть их будет нельзя.</b> Чтобы подтвердить, напиши слово <b>УДАЛИТЬ</b>:</p>
     <input id="delConf" autocomplete="off" placeholder="УДАЛИТЬ" aria-label="Подтверждение">
@@ -3520,7 +3523,7 @@ const FEATURES=[
  ["ИИ-помощник","review","📊","Разбор недели","Как от нутрициолога: что получилось, на что обратить внимание и один выполнимый совет на следующую неделю.","Приходит сам в бот по воскресеньям, если за неделю было хотя бы 3 дня с записями. Или: Дневник → «Помощник» → «Разбор недели».",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
  ["Тело и здоровье","health","❤️","Шаги из «Здоровья» на iPhone","Шаги и активные калории с iPhone и часов прибавляются к норме — в активный день можно съесть больше.","Дневник → кнопка «Подключить Здоровье» → один раз установи быструю команду по инструкции. Потом обновляешь одной кнопкой.",()=>{ go("diary"); flashEl("#hcRun,#hcConnect"); },()=>!!(typeof hcGet==="function"&&hcGet())],
  ["Тело и здоровье","weight","⚖️","Вес, талия и дата цели","Видно, как идёт похудение, и примерную дату, когда дойдёшь до цели. Дошла до цели — переключись в Профиле на «Поддержание»: норма станет такой, чтобы вес держался, а на графике появится коридор ±1,5 кг.","Вкладка «Вес» → впиши вес (раз в неделю, утром натощак) и, по желанию, талию → «Сохранить». График — во вкладке «Прогресс».",()=>{ go("weight"); flashEl("#wKg"); },()=>weights().length>0],
- ["Тело и здоровье","cycle","🌸","Учёт цикла","Перед месячными вес часто растёт на 0,5–2 кг из-за воды. Приложение предупредит об этом заранее и отметит эти дни на графике — меньше поводов расстраиваться.","Вкладка «Вес» → «Цикл» → «Начались сегодня» в первый день месячных. Или напиши боту «начались».",()=>{ go("weight"); flashEl("#cycleCard"); },()=>cycleStarts().length>0,()=>isWoman()],
+ ["Тело и здоровье","cycle","🌸","Учёт цикла","Перед месячными вес часто растёт на 0,5–2 кг из-за воды. Приложение предупредит об этом заранее и отметит эти дни на графике — меньше поводов расстраиваться.","Вкладка «Вес» → «Цикл» → «Начались сегодня» в первый день месячных. Или напиши боту «начались».",()=>{ go("weight"); flashEl("#cycleCard"); },()=>cycleStarts().length>0,()=>cycleOn()],
  ["Тело и здоровье","fiber","🥦","Клетчатка","Кроме белков, жиров и углеводов считается клетчатка — она даёт сытость. Норма — 25 г в день для женщин, 30 г для мужчин.","Ничего делать не нужно — смотри полоску «Клетчатка» под БЖУ в Дневнике.",()=>{ go("diary"); flashEl(".fibrow"); },null],
  ["Тело и здоровье","share","🏆","Карточка прогресса","Красивая картинка «минус N кг» для сторис или подруг — приятно и мотивирует.","Вкладка «Прогресс» → «Карточка прогресса — поделиться».",()=>{ go("progress"); flashEl("#progCard",500); },null],
  ["Связь и удобство","install","📲","Приложение на экране «Домой»","Дневник открывается с иконки за секунду, как обычное приложение, — без поиска бота в Telegram.","Нажми «Попробовать» — покажу по шагам, что нажать.",()=>{ closeSheet(); if(TG) openExternal(APP_URL+"?install=1"); else showInstallGuide(); },()=>IS_STANDALONE||!!installState().installed],
@@ -3537,7 +3540,7 @@ const WHY=[
  "Рецепт с любого сайта: вставь ссылку — калории и БЖУ посчитаются сами.",
  "Рецепты к каждому блюду меню — сразу на нужное число порций.",
  "Помощник подскажет, что съесть, и выберет блюдо в кафе по фото меню.",
- "Шаги из «Здоровья» прибавляются к норме, а учёт цикла объясняет скачки веса.",
+ "Шаги и активность из «Здоровья» прибавляются к норме калорий.",
  "Семья, тренер и Telegram — всё в одном месте, на русском и без рекламы."
 ];
 function openFeatures(){
@@ -3708,6 +3711,7 @@ function onReady(){
   go(profile()?"diary":"profile");
   if(/[?&]install=1/.test(location.search) && !TG && !IS_STANDALONE) setTimeout(showInstallGuide,400);
   hideSplash();
+  if(!CYCLE_ON&&Store.get("cycle")!==undefined){ try{ Store.set("cycle",undefined,true); }catch(e){} }   // данные цикла удалены по решению владельца — стираем и копию на телефоне/в Telegram
   if(!consentState()){ openConsent(true); }
   setTimeout(()=>{ tipsReady=true; renderTipsCard(); if(consentState()) maybeTour(tab); },1700);
   if(consentOk()) checkStartParam();

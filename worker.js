@@ -37,6 +37,11 @@ export class DnevnikStore extends DurableObject {
     await this.ctx.storage.put("bkidx", idx);
     return { tag, keys: cnt, kept: idx };
   }
+  async purgeCycleAll() {   // разово: удалить данные цикла у всех пользователей — и в рабочих данных, и в резервных копиях
+    const m = await this.ctx.storage.list(), ks = [...m.keys()].filter(k => /(^|:)u:[^:]+:d:cycle$/.test(k));
+    for (let i = 0; i < ks.length; i += 128) await this.ctx.storage.delete(ks.slice(i, i + 128));
+    return ks.length;
+  }
   async purgeBackups(uid, name) {   // при удалении аккаунта — убрать человека и из резервных копий (личные ключи и общие записи)
     uid = String(uid);
     const m = await this.ctx.storage.list({ prefix: "bk:" }), del = [], put = {};
@@ -61,6 +66,7 @@ function storeKV(env) {
       async putMany(entries) { for (const [k, v] of entries) await kv.put(k, String(v)); },
       async delPrefix(prefix) { const l = await this.listPrefix(prefix); for (const [k] of l) await kv.delete(k); return l.length; },
       async snapshot() { return null; },
+      async purgeCycleAll() { let n = 0; for (const [k] of await this.listPrefix("u:")) if (/:d:cycle$/.test(k)) { await kv.delete(k); n++; } return n; },
     };
   }                       // если подключено обычное KV — используем его
   const stub = () => env.STORE.get(env.STORE.idFromName("main"));
@@ -73,6 +79,7 @@ function storeKV(env) {
     async delPrefix(prefix) { return await stub().kdelPrefix(prefix); },
     async snapshot(tag) { return await stub().snapshot(tag); },
     async purgeBackups(uid, name) { return await stub().purgeBackups(uid, name); },
+    async purgeCycleAll() { return await stub().purgeCycleAll(); },
   };
 }
 
@@ -87,6 +94,7 @@ export default {
     env = { ...env, KV: storeKV(env) };
     const url = new URL(req.url);
     if (req.method === "OPTIONS") return cors(new Response(null, { status: 204 }), req);
+    await purgeCycleOnce(env).catch(() => {});
     try {
       if (url.pathname === "/") return text("Сервер дневника работает ✅");
       if (url.pathname === "/setup") return await setup(req, env, url);
@@ -109,6 +117,7 @@ export default {
   },
   async scheduled(event, env, ctx) {
     env = { ...env, KV: storeKV(env) };
+    await purgeCycleOnce(env).catch(() => {});
     ctx.waitUntil(runCron(env, new Date(event.scheduledTime)));
     const t = new Date(event.scheduledTime);
     if (t.getUTCDay() === 1 && t.getUTCHours() === 3 && t.getUTCMinutes() < 30 && env.KV.snapshot) ctx.waitUntil(env.KV.snapshot(t.toISOString().slice(0, 10)).catch(() => {}));
@@ -348,7 +357,7 @@ async function onTelegram(req, env, ctx) {
     await send(env, uid, await weekText(env, uid, localDate(new Date(), s.tz)), { reply_markup: openBtn(env) });
   } else if (cmd === "/delete") {
     const tok = rid(10); await kput(env, `delc:${uid}`, tok, 60 * 10);
-    await send(env, uid, "🗑 <b>Удалить все твои данные?</b>\n\nСотрутся дневник, вес, меню, блюда, цикл, настройки и напоминания — на сервере и в резервных копиях. Ты выйдешь из семьи, тренер потеряет доступ. Вернуть данные будет нельзя.\n\nКопия в мини-приложении Telegram и на телефоне сотрётся при следующем открытии дневника. Переписку с ботом можно удалить в самом Telegram (удалить чат).",
+    await send(env, uid, "🗑 <b>Удалить все твои данные?</b>\n\nСотрутся дневник, вес, меню, блюда, настройки и напоминания — на сервере и в резервных копиях. Ты выйдешь из семьи, тренер потеряет доступ. Вернуть данные будет нельзя.\n\nКопия в мини-приложении Telegram и на телефоне сотрётся при следующем открытии дневника. Переписку с ботом можно удалить в самом Telegram (удалить чат).",
       { reply_markup: { inline_keyboard: [[{ text: "Да, удалить всё", callback_data: `del:${tok}` }], [{ text: "Отмена", callback_data: "del:no" }]] } });
   } else if (cmd === "/stop") {
     const s = await userSettings(env, uid); s.log.on = false; s.summary.on = false; s.weigh.on = false; s.weekly.on = false;
@@ -789,7 +798,17 @@ ${days.map(d => `${d.date}: ${d.kcal} ккал из ${d.norm || "?"}; Б ${d.p} 
   return `🧑‍⚕️ <b>Разбор недели</b>\n\n<b>Что получилось</b>\n${li(j.good)}\n\n<b>На что обратить внимание</b>\n${li(j.watch)}\n\n<b>Совет на неделю</b>\n${esc(String(j.tip || ""))}`;
 }
 
-/* --- цикл: «начались» --- */
+/* --- цикл: «начались» ---
+   Учёт цикла временно отключён (самые чувствительные данные): бот не принимает отметки, сервер не сохраняет новые данные цикла.
+   Уже сохранённое не удаляется автоматически. Включить обратно — CYCLE_ON = true (и в приложении). */
+const CYCLE_ON = false;
+// Разовое удаление уже внесённых данных цикла (по решению владельца, 27.10.2026). Выполняется один раз при первом запросе после обновления.
+async function purgeCycleOnce(env) {
+  if (CYCLE_ON || await env.KV.get("purge:cycle:v1")) return;
+  await env.KV.put("purge:cycle:v1", "running");
+  try { const n = env.KV.purgeCycleAll ? await env.KV.purgeCycleAll() : 0; await env.KV.put("purge:cycle:v1", JSON.stringify({ at: Date.now(), removed: n })); }
+  catch (e) { await env.KV.delete("purge:cycle:v1"); }
+}
 async function botCycle(env, uid, s) {
   const date = localDate(new Date(), s.tz), k = `u:${uid}:d:cycle`, cur = await kget(env, k);
   const st = ((cur && cur.v && cur.v.starts) || []).filter(x => Math.abs((Date.parse(x) - Date.parse(date)) / 864e5) > 10);
@@ -951,7 +970,7 @@ async function botMessage(env, m) {
     const link = t.match(/https?:\/\/[^\s]+/);
     if (link) return await botRecipeUrl(env, uid, link[0]);
     if (looksLikeRecipe(t)) return await botRecipe(env, uid, t, null);
-    if (/^(у меня\s+)?(месячные\s+)?(начались|пошли)(\s+месячные)?[.!\s]*$|^месячные[.!\s]*$/i.test(t)) return await botCycle(env, uid, s);
+    if (CYCLE_ON && /^(у меня\s+)?(месячные\s+)?(начались|пошли)(\s+месячные)?[.!\s]*$|^месячные[.!\s]*$/i.test(t)) return await botCycle(env, uid, s);
     if (isSuggestAsk(t)) return await botSuggest(env, uid, s, t);
     return await botFoodText(env, uid, s, t, false);
   } catch (e) {
@@ -996,8 +1015,6 @@ const HELP_TEXT = `<b>Как записывать еду прямо здесь, 
 🤔 <b>«Что съесть?»</b> — спроси «что на ужин?», и я предложу 3 варианта под остаток калорий и продукты, которые есть дома.
 
 🧾 <b>Меню в кафе</b> — сфотографируй меню с подписью «что заказать», и я подскажу лучшие блюда под твою норму.
-
-🌸 <b>Цикл</b> — напиши «начались» в первый день месячных, и я буду объяснять скачки веса из-за воды.
 
 🔗 <b>Рецепт по ссылке</b> — пришли ссылку на рецепт с любого сайта, и я сохраню блюдо в «Меню» → «Блюда» с калориями на порцию. Если сайт не открывается — пришли текст рецепта сообщением.
 
@@ -1262,7 +1279,7 @@ async function api(req, env, url, user, ctx) {
   }
   if (p === "data" && req.method === "GET") {
     const pre = `u:${user.id}:d:`, rows = await env.KV.listPrefix(pre), docs = {};
-    for (const [k, v] of rows) { try { docs[k.slice(pre.length)] = JSON.parse(v); } catch (e) {} }
+    for (const [k, v] of rows) { if (!CYCLE_ON && k.endsWith(":d:cycle")) continue; try { docs[k.slice(pre.length)] = JSON.parse(v); } catch (e) {} }
     return json({ docs, me: { id: user.id, name: user.name }, health: await kget(env, `hp:${user.id}`), coach: await coachInfo(env, user.id) });
   }
   if (p === "data") {   // {docs:{key:{v,at}}} — побеждает более свежая запись
@@ -1274,6 +1291,7 @@ async function api(req, env, url, user, ctx) {
     const write = [], accepted = {}, newer = {};
     for (const k of keys) {
       const d = incoming[k]; if (!d || typeof d.at !== "number" || d.at <= gone) continue;
+      if (k === "cycle" && !CYCLE_ON) continue;   // учёт цикла отключён — новые данные цикла не принимаем
       const size = JSON.stringify(d).length; if (size > 1_500_000) continue;
       if (!cur[k] || d.at > (cur[k].at || 0)) { write.push([pre + k, JSON.stringify({ v: d.v === undefined ? null : d.v, at: d.at })]); accepted[k] = d.at; }
       else if (cur[k].at > d.at) newer[k] = cur[k];
