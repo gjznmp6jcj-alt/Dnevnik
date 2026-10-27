@@ -43,6 +43,7 @@
   --bg:#111813; --surface:#19221C; --surface2:#222D25; --line:#2E3B32;
   --fg:#E6EEE7; --muted:#9AA99E; --accent:#6FC195; --accent-ink:#0E1A13; --accent-soft:#1F3A2B;
   --warn:#F0965C; --warn-soft:#3B2618; --prot:#7FA8DD; --fat:#E5BC63; --carb:#7DC08F; --fib:#B39AE0; color-scheme:dark}
+:root{--safe-top:max(env(safe-area-inset-top,0px), calc(var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px)))}
 *{box-sizing:border-box}
 html,body{margin:0}
 img{max-width:100%}
@@ -63,7 +64,7 @@ img{max-width:100%}
 }
 html,body{background:var(--bg);color:var(--fg)}
 body{font-family:var(--body);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
-.app{max-width:600px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:calc(12px + env(safe-area-inset-top,0px)) calc(96px + env(safe-area-inset-bottom,0px))}
+.app{max-width:600px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:calc(12px + var(--safe-top)) calc(96px + env(safe-area-inset-bottom,0px))}
 h1,h2,h3{margin:0;text-wrap:balance}
 h1{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em}
 h2{font-family:var(--display);font-weight:500;font-size:15px;letter-spacing:.01em}
@@ -81,7 +82,7 @@ h2{font-family:var(--display);font-weight:500;font-size:15px;letter-spacing:.01e
 .row>*{min-width:0}
 .grow{flex:1 1 0}
 .stack>label.f{flex:none}
-.croproot{position:fixed;inset:0;z-index:70;background:#0b0f0c;color:#e6eee7;display:flex;flex-direction:column;padding:calc(10px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));gap:10px}
+.croproot{position:fixed;inset:0;z-index:70;background:#0b0f0c;color:#e6eee7;display:flex;flex-direction:column;padding:calc(10px + var(--safe-top)) max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));gap:10px}
 .cropbar{display:flex;flex-direction:column;gap:4px;text-align:center}.cropbar .small{color:#9aa99e}
 .cropwrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
 .cropcv{touch-action:none;max-width:100%;max-height:100%;border-radius:8px}
@@ -101,8 +102,8 @@ button:disabled{opacity:.5;cursor:default}
 .seg button{flex:1 0 auto;background:transparent;padding:8px 10px;font-size:13px;font-weight:700;color:var(--muted);border-radius:8px}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 /* date bar */
-.datebar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:8px;padding-block:6px}
-body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.datebar{position:sticky;top:var(--safe-top);z-index:5;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:8px;padding-block:6px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:var(--safe-top);z-index:10;background:var(--bg)}
 .datebar .d{font-weight:800;font-size:16px;text-align:center;flex:1;position:relative}
 .datebar .d input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .datebar button{font-size:20px;padding:4px 14px;background:var(--surface)}
@@ -139,7 +140,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .cs-box h2{margin:0;font-size:19px}.cs-box ul{margin:0;padding-left:20px;display:grid;gap:6px}.cs-box li{line-height:1.4}
 .cs-act{position:sticky;bottom:calc(-18px - env(safe-area-inset-bottom,0px));background:var(--surface);display:flex;flex-direction:column;gap:8px;padding:10px 0 calc(18px + env(safe-area-inset-bottom,0px));margin-bottom:calc(-18px - env(safe-area-inset-bottom,0px));box-shadow:0 -10px 16px -12px rgba(0,0,0,.25)}
 .cs-sec{font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#6b7a70);margin-top:4px}
-.ig-bg{position:fixed;inset:0;z-index:200;background:rgba(10,20,14,.55);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(16px,env(safe-area-inset-top,0px)) 16px 0}
+.ig-bg{position:fixed;inset:0;z-index:200;background:rgba(10,20,14,.55);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(16px,var(--safe-top)) 16px 0}
 .ig-card{background:var(--surface);border-radius:18px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 .ig-card ol{margin:10px 0 0;padding-left:22px;display:grid;gap:10px}.ig-card li{line-height:1.35}
 .ig-ico{display:inline-flex;vertical-align:-5px;width:24px;height:24px;border-radius:6px;background:var(--surface2);align-items:center;justify-content:center;margin:0 2px}
@@ -405,7 +406,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-27 · 49</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-27 · 51</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -427,7 +428,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
 const IS_TEST=/-test\//i.test(location.pathname);
 if(IS_TEST){ try{ const P="test:", S=Storage.prototype, g=S.getItem, st=S.setItem, r=S.removeItem;
   S.getItem=function(k){ return g.call(this,P+k); }; S.setItem=function(k,v){ return st.call(this,P+k,v); }; S.removeItem=function(k){ return r.call(this,P+k); };
-  document.addEventListener("DOMContentLoaded",()=>{ const b=document.createElement("div"); b.textContent="ТЕСТ"; b.style.cssText="position:fixed;top:calc(6px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:80;background:#E5484D;color:#fff;font:700 11px/1 system-ui;letter-spacing:.1em;padding:4px 10px;border-radius:999px;pointer-events:none"; document.body.appendChild(b); const v=document.getElementById("verLine"); if(v) v.insertAdjacentHTML("beforeend"," · <b style=\"color:#E5484D\">тестовая копия</b>"); });
+  document.addEventListener("DOMContentLoaded",()=>{ const b=document.createElement("div"); b.textContent="ТЕСТ"; b.style.cssText="position:fixed;top:calc(6px + var(--safe-top));left:50%;transform:translateX(-50%);z-index:80;background:#E5484D;color:#fff;font:700 11px/1 system-ui;letter-spacing:.1em;padding:4px 10px;border-radius:999px;pointer-events:none"; document.body.appendChild(b); const v=document.getElementById("verLine"); if(v) v.insertAdjacentHTML("beforeend"," · <b style=\"color:#E5484D\">тестовая копия</b>"); });
 }catch(e){} }
 "use strict";
 /* ---------- Справочник (на 100 г): название, ккал, Б, Ж, У ---------- */
@@ -1694,7 +1695,7 @@ function recentFoods(){
   for(const d of allDays().reverse().slice(0,14)){
     for(const m of getDay(d).meals.slice().reverse()){
       const k=norm(m.name); if(seen.has(k)) continue; seen.add(k);
-      const f=af.find(x=>norm(x.name)===k)||{name:m.name,kcal:m.kcal,p:m.p,f:m.f,c:m.c};
+      const f=af.find(x=>norm(x.name)===k)||{name:m.name,kcal:m.kcal,p:m.p,f:m.f,c:m.c,...(m.fb!=null?{fb:m.fb}:{})};
       out.push({...f,lastG:m.g}); if(out.length>=10) return out;
     }
   }
@@ -2170,17 +2171,40 @@ function decEntry(a){
   if(a[0]==="d"){ const ing=(a[6]||[]).map(decItem).filter(Boolean); const f=dishFood({name:a[2],portions:Math.max(1,Math.round(a[5]/a[4])),ing}); return {id:uidGen(),meal:a[1],name:a[2],g:+a[3],kcal:r1(f.kcal),p:r1(f.p),f:r1(f.f),c:r1(f.c),ing,totalG:r1(f.totalG),portionG:r1(f.portionG)}; }
   const it=decItem(a.slice(2)); return it?{id:uidGen(),meal:a[1],...it}:null;
 }
+// Отправка семье. Код готовим заранее, а окно Telegram открываем прямо по нажатию —
+// иначе Telegram иногда молча игнорирует открытие ссылки (через раз).
+let shareBusy=false;
 async function shareToFamily(obj,title){
-  let code; try{ code=await packShare(obj); }catch(e){ toast("Не получилось подготовить отправку"); return; }
+  if(shareBusy) return; shareBusy=true;
+  let code; try{ code=await packShare(obj); }catch(e){ shareBusy=false; toast("Не получилось подготовить отправку"); return; }
+  shareBusy=false;
   const link=`https://t.me/${BOT_USERNAME}?startapp=${code}`;
   let url,text;
   if(code.length<=500){ url=link; text=`${title}. Нажми на ссылку — откроется дневник, и ты добавишь себе свою порцию.`; }
   else { url=`https://t.me/${BOT_USERNAME}`; text=`${title}.\nЭто много данных для ссылки, поэтому так: скопируй это сообщение целиком, открой дневник и нажми «Вставить, что прислали».\nКОД:${code}`; }
-  if(TG&&TG.openTelegramLink){ try{ TG.openTelegramLink("https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent(text)); return; }catch(e){} }
-  if(!TG){ openExternal("https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent(text)); return; }
+  const shareUrl="https://t.me/share/url?url="+encodeURIComponent(url)+"&text="+encodeURIComponent(text);
   const all=text+"\n"+url;
-  try{ await navigator.clipboard.writeText(all); toast("Скопировано — отправь в семейный чат"); }
-  catch(e){ openSheet2(`<div class="row" style="justify-content:space-between"><h2>Отправить семье</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><p class="note" style="margin:0">Скопируй и отправь в семейный чат:</p><textarea rows="6" style="font:inherit;font-size:13px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(all)}</textarea>`); }
+  const draw=()=>{
+    const fam=serverReady()&&famState&&famState.family;
+    openSheet2(`<div class="row" style="justify-content:space-between"><h2>Отправить семье</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+      <p class="small" style="margin:0">${esc(title)}</p>
+      ${fam?`<button class="primary" id="shFam">В группу «${esc(fam.title)}»</button><p class="note" style="margin:0">Появится в ленте семьи, и бот пришлёт всем уведомление с кнопкой «Добавить себе».</p>`:""}
+      <button ${fam?"":'class="primary"'} id="shChat">Выбрать чат в Telegram</button>
+      <button class="ghost small" id="shCopy">Скопировать текст</button>`);
+    $("shChat").onclick=()=>{
+      closeSheet2();
+      try{ if(TG&&TG.openTelegramLink){ TG.openTelegramLink(shareUrl); return; } }catch(e){}
+      openExternal(shareUrl);
+    };
+    $("shCopy").onclick=async()=>{
+      try{ await navigator.clipboard.writeText(all); closeSheet2(); toast("Скопировано — вставь в семейный чат"); }
+      catch(e){ openSheet2(`<div class="row" style="justify-content:space-between"><h2>Отправить семье</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><p class="note" style="margin:0">Выдели и скопируй, потом отправь в семейный чат:</p><textarea rows="6" style="font:inherit;font-size:13px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(all)}</textarea>`); }
+    };
+    if(fam) $("shFam").onclick=async e=>{ e.target.disabled=true; e.target.textContent="Отправляю…"; closeSheet2(); await famAction("family/post",{kind:obj.t,title,code},"Отправлено семье"); };
+  };
+  draw();
+  // группа семьи ещё не подгружена — подгружаем и дорисовываем кнопку
+  if(serverReady()&&!famState){ await famLoad(true); if(famState&&famState.family&&$("shChat")) draw(); }
 }
 function shareDish(d){ shareToFamily({t:"d",n:d.name,p:d.portions||1,i:d.ing.map(encItem)}, `Блюдо «${d.name}» (${d.portions||1} порц.)`); }
 function shareMeal(date,meal){ const items=getDay(date).meals.filter(x=>x.meal===meal); if(!items.length) return; shareToFamily({t:"m",m:meal,i:items.map(encItem)}, `${meal}, ${human(date)}: ${items.map(x=>x.name).slice(0,3).join(", ")}${items.length>3?"…":""}`); }
@@ -2658,20 +2682,6 @@ function famJoinPrompt(code){
     <button class="primary" id="famJoinYes">Присоединиться</button>`);
   $("famJoinYes").onclick=async()=>{ closeSheet2(); await famAction("family/join",{code},"Ты в семье!"); menuSub="family"; go("menu"); };
 }
-/* «Отправить семье»: если есть группа — предлагаем отправить туда */
-const _shareToFamilyChat=shareToFamily;
-shareToFamily=async function(obj,title){
-  if(!(serverReady()&&famState)) return _shareToFamilyChat(obj,title);
-  const kcal = obj.t==="d" ? null : null;
-  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Отправить семье</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
-    <p class="small" style="margin:0">${esc(title)}</p>
-    <button class="primary" id="shFam">В группу «${esc(famState.family.title)}»</button>
-    <p class="note" style="margin:0">Появится в ленте семьи, и бот пришлёт всем уведомление с кнопкой «Добавить себе».</p>
-    <button id="shChat">Выбрать чат в Telegram</button>`);
-  $("shChat").onclick=()=>{ closeSheet2(); _shareToFamilyChat(obj,title); };
-  $("shFam").onclick=async()=>{ const code=await packShare(obj); closeSheet2(); await famAction("family/post",{kind:obj.t,title,code},"Отправлено семье"); };
-};
-
 /* ================= ПРОФИЛЬ: сервер, напоминания, иконка, выгрузка ================= */
 function renderServerCards(){
   const el=$("integrCards"); if(!el) return;
@@ -2734,7 +2744,6 @@ function bindIntegrations(){
     if(el.dataset.fbuy!=null){ famAction("family/shop",{key:el.dataset.fbuy,bought:el.checked}); }
     if(el.id==="aiFile"){ const f=el.files&&el.files[0]; el.value=""; if(f) openAiPhoto(f); }
   });
-  if(TG&&TG.onEvent){ try{ TG.onEvent("homeScreenAdded",()=>toast("Иконка добавлена на экран")); }catch(e){} }
 }
 /* ================= АККАУНТ: вход вне Telegram и общие данные ================= */
 const SESSION_KEY="dnevnik-session", AT_KEY="dnevnik-at";
@@ -3274,7 +3283,7 @@ function bind(){
     if(t.dataset.meal){ meal=t.dataset.meal; updateMealSeg(); }
     if(t.dataset.del){ const day=clone(getDay(curDate)); day.meals=day.meals.filter(x=>x.id!==t.dataset.del); putDay(curDate,day); }
     if(t.dataset.wdel){ const day=clone(getDay(curDate)); day.workouts=day.workouts.filter(x=>x.id!==t.dataset.wdel); putDay(curDate,day); }
-    if(t.dataset.recent){ const f=allFoods().find(x=>norm(x.name)===norm(t.dataset.recent)); if(f){ $("fGrams").value=t.dataset.g; pick(f); } }
+    if(t.dataset.recent){ const k=norm(t.dataset.recent); const f=allFoods().find(x=>norm(x.name)===k)||recentFoods().find(x=>norm(x.name)===k); if(f){ const {lastG,...food}=f; $("fGrams").value=(t.dataset.g&&t.dataset.g!=="undefined")?t.dataset.g:(lastG||100); pick(food); } }
     if(t.dataset.i!=null && t.closest("#fSugg")) pick(suggList[+t.dataset.i]);
     if(t.dataset.new) openNewFood(parseInput().q);
     if(t.dataset.online){ $("fSugg").hidden=true; openOnlineSearch(parseInput().q, f=>pick(f)); }
@@ -3526,7 +3535,7 @@ const FEATURES=[
  ["Тело и здоровье","cycle","🌸","Учёт цикла","Перед месячными вес часто растёт на 0,5–2 кг из-за воды. Приложение предупредит об этом заранее и отметит эти дни на графике — меньше поводов расстраиваться.","Вкладка «Вес» → «Цикл» → «Начались сегодня» в первый день месячных. Или напиши боту «начались».",()=>{ go("weight"); flashEl("#cycleCard"); },()=>cycleStarts().length>0,()=>cycleOn()],
  ["Тело и здоровье","fiber","🥦","Клетчатка","Кроме белков, жиров и углеводов считается клетчатка — она даёт сытость. Норма — 25 г в день для женщин, 30 г для мужчин.","Ничего делать не нужно — смотри полоску «Клетчатка» под БЖУ в Дневнике.",()=>{ go("diary"); flashEl(".fibrow"); },null],
  ["Тело и здоровье","share","🏆","Карточка прогресса","Красивая картинка «минус N кг» для сторис или подруг — приятно и мотивирует.","Вкладка «Прогресс» → «Карточка прогресса — поделиться».",()=>{ go("progress"); flashEl("#progCard",500); },null],
- ["Связь и удобство","install","📲","Приложение на экране «Домой»","Дневник открывается с иконки за секунду, как обычное приложение, — без поиска бота в Telegram.","Нажми «Попробовать» — покажу по шагам, что нажать.",()=>{ closeSheet(); if(TG) openExternal(APP_URL+"?install=1"); else showInstallGuide(); },()=>IS_STANDALONE||!!installState().installed],
+ ["Связь и удобство","install","📲","Приложение на экране «Домой»","Дневник открывается с иконки за секунду, как обычное приложение, — без поиска бота в Telegram.","Нажми «Попробовать» — покажу по шагам, что нажать.",()=>{ closeSheet(); if(TG_HOME) tgHomeAdd(); else if(TG) openExternal(APP_URL+"?install=1"); else showInstallGuide(); },()=>IS_STANDALONE||!!installState().installed],
  ["Связь и удобство","remind","⏰","Напоминания от бота","Бот напомнит записать еду, если день пустой, и взвеситься; вечером пришлёт итог дня, в воскресенье — отчёт за неделю.","Профиль → «Сервер и бот» → «Напоминания бота»: отметь нужные, выбери время → «Сохранить напоминания».",()=>{ go("profile"); flashEl("#rmLog,#integrCards",500); },null],
  ["Связь и удобство","coach","🏋️","Тренер или нутрициолог","Открой доступ своему тренеру — он увидит дневник и сможет оставлять комментарии. А если ты сама тренер — веди здесь клиентов.","Профиль → «Кабинет тренера».",()=>{ go("profile"); flashEl("#coachCards",500); },null],
  ["Связь и удобство","excel","📄","Выгрузка в Excel","Весь дневник, вес и тренировки одним файлом — для себя или для врача.","Профиль → «Выгрузить в Excel».",()=>{ go("profile"); flashEl("#csvBtn",500); },null]
@@ -3657,6 +3666,17 @@ let bipEvt=null; addEventListener("beforeinstallprompt",e=>{ e.preventDefault();
 const SHARE_ICO=`<span class="ig-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8"/></svg></span>`;
 const ADD_ICO=`<span class="ig-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg></span>`;
 function installState(){ return Store.get("installPrompt")||{}; }
+/* Telegram: иконка на экран «Домой» и полный экран (Bot API 8.0) */
+const TG_HOME = !!(TG && TG.isVersionAtLeast && TG.isVersionAtLeast("8.0") && typeof TG.addToHomeScreen==="function" && TG.platform!=="unknown");
+const TG_MOBILE = !!(TG && /^(ios|android)/.test(TG.platform||""));
+function tgHomeAdd(){
+  try{ TG.addToHomeScreen(); }catch(e){ toast("Не получилось. Обнови Telegram и попробуй ещё раз"); }
+}
+if(TG_HOME){
+  try{ TG.onEvent("homeScreenAdded",()=>{ installSet({installed:today()}); try{ renderAll(); }catch(_){} toast("Иконка добавлена 📲"); }); }catch(e){}
+  try{ TG.checkHomeScreenStatus(st=>{ if(st==="added"&&!installState().installed){ installSet({installed:today()}); try{ renderAll(); }catch(_){} } }); }catch(e){}
+}
+if(TG_MOBILE){ try{ if(TG.isVersionAtLeast("8.0")&&!TG.isFullscreen) TG.requestFullscreen(); }catch(e){} }
 function installSet(v){ Store.set("installPrompt",{...installState(),...v}); }
 function installWanted(){
   if(IS_STANDALONE) return false;
@@ -3669,7 +3689,7 @@ function renderInstallNudge(){
   const el=$("installNudge"); if(!el) return;
   if(!installWanted()||curDate!==today()){ el.hidden=true; return; }
   el.hidden=false;
-  const where = TG ? "Откроется Safari — там покажу, куда нажать. Займёт 20 секунд." : IS_IOS ? "Две кнопки в Safari — покажу, какие." : "Иконка появится на главном экране.";
+  const where = TG_HOME ? "Одна кнопка — Telegram сам добавит иконку." : TG ? "Откроется Safari — там покажу, куда нажать. Займёт 20 секунд." : IS_IOS ? "Две кнопки в Safari — покажу, какие." : "Иконка появится на главном экране.";
   el.innerHTML=`<div class="row" style="gap:12px;align-items:flex-start;flex-wrap:nowrap"><div style="font-size:30px;line-height:1;flex:none;width:36px">📲</div><div class="stack" style="gap:4px;flex:1;min-width:0"><b>Поставь дневник на экран «Домой»</b><span class="small">Будет открываться с иконки, как обычное приложение — без поиска бота в Telegram. Записи общие с ботом. ${where}</span></div></div>
     <button class="primary" id="instGo">Установить</button>
     <div class="row" style="justify-content:space-between"><button class="ghost small" id="instLater" style="padding-left:0">Не сейчас</button><button class="ghost small" id="instOff">Больше не показывать</button></div>`;
@@ -3695,6 +3715,7 @@ function showInstallGuide(){
 document.addEventListener("click",async e=>{
   const b=e.target.closest&&e.target.closest("button"); if(!b) return;
   if(b.id==="instGo"){
+    if(TG_HOME){ tgHomeAdd(); return; }
     if(TG){ openExternal(APP_URL+"?install=1"); return; }
     if(bipEvt){ bipEvt.prompt(); const ch=await bipEvt.userChoice.catch(()=>null); bipEvt=null; if(ch&&ch.outcome==="accepted"){ installSet({installed:today()}); renderAll(); } return; }
     showInstallGuide();
