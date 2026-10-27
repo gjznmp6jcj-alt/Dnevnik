@@ -37,11 +37,19 @@ export class DnevnikStore extends DurableObject {
     await this.ctx.storage.put("bkidx", idx);
     return { tag, keys: cnt, kept: idx };
   }
-  async purgeBackups(uid) {   // при удалении аккаунта — убрать человека и из резервных копий
-    const re = new RegExp(`^bk:[^:]+:(?:(?:u|d|ai|mn|rvw|sg|undo):${uid}:|(?:s|hp|j|n|uf|uhk|cl|cm|tl|tp):${uid}$)`);
-    const m = await this.ctx.storage.list({ prefix: "bk:" }); const ks = [...m.keys()].filter(k => re.test(k));
-    for (let i = 0; i < ks.length; i += 128) await this.ctx.storage.delete(ks.slice(i, i + 128));
-    return ks.length;
+  async purgeBackups(uid, name) {   // при удалении аккаунта — убрать человека и из резервных копий (личные ключи и общие записи)
+    uid = String(uid);
+    const m = await this.ctx.storage.list({ prefix: "bk:" }), del = [], put = {};
+    for (const [k, r] of m) {
+      const inner = k.split(":").slice(2).join(":");
+      if (isPersonalKey(inner, uid)) { del.push(k); continue; }
+      const res = r && typeof r.v === "string" ? scrubShared(inner, r.v, uid, name) : null;
+      if (!res) continue;
+      if (res.del) del.push(k); else put[k] = { ...r, v: res.val };
+    }
+    for (let i = 0; i < del.length; i += 128) await this.ctx.storage.delete(del.slice(i, i + 128));
+    const pk = Object.keys(put); for (let i = 0; i < pk.length; i += 100) { const o = {}; for (const k of pk.slice(i, i + 100)) o[k] = put[k]; await this.ctx.storage.put(o); }
+    return del.length + pk.length;
   }
 }
 function storeKV(env) {
@@ -64,7 +72,7 @@ function storeKV(env) {
     async putMany(entries) { await stub().kputMany(entries.map(([k, v]) => [k, String(v)])); },
     async delPrefix(prefix) { return await stub().kdelPrefix(prefix); },
     async snapshot(tag) { return await stub().snapshot(tag); },
-    async purgeBackups(uid) { return await stub().purgeBackups(uid); },
+    async purgeBackups(uid, name) { return await stub().purgeBackups(uid, name); },
   };
 }
 
@@ -113,7 +121,7 @@ const text = (t, status = 200) => new Response(t, { status, headers: { "content-
 function cors(res, req) {
   const h = new Headers(res.headers);
   h.set("access-control-allow-origin", req.headers.get("origin") || "*");
-  h.set("access-control-allow-headers", "content-type, x-tg-init, x-session");
+  h.set("access-control-allow-headers", "content-type, x-tg-init, x-session, x-device");
   h.set("access-control-allow-methods", "GET, POST, OPTIONS");
   h.set("access-control-max-age", "86400");
   return new Response(res.body, { status: res.status, headers: h });
@@ -149,25 +157,68 @@ async function auth(req, env) {
 }
 
 /* ---------------- удаление аккаунта: все данные человека с сервера ---------------- */
+/* Чистка общих записей от человека: семьи, тренерские связи и комментарии, список пользователей, коды, входы.
+   Возвращает null (не касается), {del:true} (удалить запись) или {val: новое значение}. Используется и для живых данных, и для резервных копий. */
+const PERSONAL = ["u", "d", "ai", "mn", "rvw", "sg", "undo"], PERSONAL1 = ["s", "hp", "j", "n", "uf", "uhk", "cl", "cm", "tl", "tp", "delc", "cs"];
+function isPersonalKey(key, uid) {
+  return PERSONAL.some(p => key.startsWith(`${p}:${uid}:`)) || PERSONAL1.some(p => key === `${p}:${uid}`);
+}
+function scrubShared(key, raw, uid, name) {
+  let x; try { x = JSON.parse(raw); } catch (e) { x = raw; }
+  const ids = a => Array.isArray(a) && a.map(String).includes(uid);
+  if (key.startsWith("fam:")) {
+    if (!x || !Array.isArray(x.members)) return null;
+    let ch = false;
+    const m0 = x.members.length; x.members = x.members.filter(m => String(m.id) !== uid); if (x.members.length !== m0) ch = true;
+    const f0 = (x.feed || []).length; x.feed = (x.feed || []).filter(it => String(it.from) !== uid); if (x.feed.length !== f0) ch = true;
+    if (x.menu && String(x.menu.by) === uid) { x.menu = null; ch = true; }
+    const by = x.shopBy || {};
+    for (const k of Object.keys(x.shop || {})) if (String(by[k]) === uid || (!by[k] && name && x.shop[k] === name)) { delete x.shop[k]; delete by[k]; ch = true; }
+    if (x.shopBy) x.shopBy = by;
+    if (!ch) return null;
+    if (!x.members.length) return { del: true };
+    if (String(x.owner) === uid) x.owner = x.members[0].id;
+    return { val: JSON.stringify(x) };
+  }
+  if (key === "users" || key.startsWith("tl:") || key.startsWith("cl:")) return ids(x) ? { val: JSON.stringify(x.filter(v => String(v) !== uid)) } : null;
+  if (key.startsWith("cm:")) return Array.isArray(x) && x.some(c => String(c.from) === uid) ? { val: JSON.stringify(x.filter(c => String(c.from) !== uid)) } : null;
+  if (key.startsWith("tc:") || key === "owner") return String(x && x.uid || x) === uid ? { del: true } : null;
+  if (/^(sess|lc|ln):/.test(key)) return x && String(x.id || x.uid) === uid ? { del: true } : null;
+  return null;
+}
 async function deleteAccount(env, uid) {
-  let n = 0;
-  // семья
-  const fc = await env.KV.get(`uf:${uid}`);
-  if (fc) { const f = await kget(env, `fam:${fc}`); if (f && f.members) { f.members = f.members.filter(m => m.id !== uid); if (!f.members.length) await env.KV.delete(`fam:${fc}`); else { if (f.owner === uid) f.owner = f.members[0].id; await kput(env, `fam:${fc}`, f); } } }
-  // как клиент тренера
-  for (const t of (await kget(env, `cl:${uid}`, [])) || []) await kput(env, `tl:${t}`, ((await kget(env, `tl:${t}`, [])) || []).filter(x => x !== uid));
-  // как тренер
-  for (const c of (await kget(env, `tl:${uid}`, [])) || []) await kput(env, `cl:${c}`, ((await kget(env, `cl:${c}`, [])) || []).filter(x => x !== uid));
-  for (const [k, v] of await env.KV.listPrefix("tc:")) { let x = v; try { x = JSON.parse(v); } catch (e) {} if (String(x && x.uid || x) === uid) { await env.KV.delete(k); n++; } }
-  // ключ «Здоровья»
-  const hk = await env.KV.get(`uhk:${uid}`); if (hk) await env.KV.delete(`hk:${hk}`);
-  // сессии входа
-  for (const [k, v] of await env.KV.listPrefix("sess:")) { let x = v; try { x = JSON.parse(v); } catch (e) {} if (x && String(x.id) === uid) { await env.KV.delete(k); n++; } }
-  for (const k of ["s", "hp", "j", "n", "uf", "uhk", "cl", "cm", "tl", "tp"]) { await env.KV.delete(`${k}:${uid}`); n++; }
-  for (const pf of ["u", "d", "ai", "mn", "rvw", "sg", "undo"]) n += await env.KV.delPrefix(`${pf}:${uid}:`);
-  await kput(env, "users", ((await kget(env, "users", [])) || []).filter(x => String(x) !== uid));
-  if (env.KV.purgeBackups) n += await env.KV.purgeBackups(uid);
-  return { ok: true, removed: n };
+  uid = String(uid); let n = 0;
+  const name = await env.KV.get(`n:${uid}`);
+  // 1. общие записи: семьи (участие, лента, меню, покупки — включая «старые» семьи), тренеры и клиенты, комментарии, коды, входы
+  for (const pf of ["fam:", "tl:", "cl:", "cm:", "tc:", "sess:", "lc:", "ln:"]) {
+    for (const [k, v] of await env.KV.listPrefix(pf)) {
+      if (isPersonalKey(k, uid)) continue;
+      const res = scrubShared(k, v, uid, name); if (!res) continue;
+      if (res.del) await env.KV.delete(k); else await env.KV.put(k, res.val);
+      n++;
+    }
+  }
+  for (const k of ["users", "owner"]) { const v = await env.KV.get(k); const res = v != null ? scrubShared(k, v, uid, name) : null; if (res) { if (res.del) await env.KV.delete(k); else await env.KV.put(k, res.val); n++; } }
+  // 2. личные данные: ключ «Здоровья», всё с префиксом человека
+  const hk = await env.KV.get(`uhk:${uid}`); if (hk) { await env.KV.delete(`hk:${hk}`); n++; }
+  for (const k of PERSONAL1) { await env.KV.delete(`${k}:${uid}`); n++; }
+  for (const pf of PERSONAL) n += await env.KV.delPrefix(`${pf}:${uid}:`);
+  // 3. резервные копии
+  if (env.KV.purgeBackups) n += await env.KV.purgeBackups(uid, name);
+  // 4. отметка «удалено»: копии в облаке Telegram и на других телефонах сотрутся при следующем открытии,
+  //    старые записи не смогут «воскресить» аккаунт. Хранится только ID и время, 180 дней.
+  const at = Date.now();
+  await kput(env, `gone:${uid}`, { at, dev: [] }, 60 * 60 * 24 * 180);
+  return { ok: true, removed: n, at };
+}
+
+/* Отметка об удалении аккаунта: {at, dev:[устройства, которые уже стёрли свою старую копию]}.
+   Пока устройство не подтвердило очистку, его записи не принимаются — старые копии не «воскресят» данные. */
+async function goneInfo(env, uid, req) {
+  let g = await kget(env, `gone:${uid}`); if (!g) return null;
+  if (typeof g === "number") g = { at: g, dev: [] };
+  const dev = String(req.headers.get("x-device") || "").replace(/[^a-z0-9]/gi, "").slice(0, 40);
+  return { ...g, dev, cleared: !!dev && (g.dev || []).includes(dev) };
 }
 
 /* ---------------- вход в отдельном приложении через бота ---------------- */
@@ -284,14 +335,21 @@ async function onTelegram(req, env, ctx) {
   } else if (cmd === "/help") {
     await send(env, uid, HELP_TEXT, { reply_markup: openBtn(env, "Открыть дневник 🌿") });
   } else if (cmd === "/today") {
+    if (!(await hasConsent(env, uid))) { await consentPrompt(env, uid); return text("ok"); }
     const s = await userSettings(env, uid);
     await send(env, uid, await dayText(env, uid, localDate(new Date(), s.tz)), { reply_markup: openBtn(env) });
   } else if (cmd === "/review") {
+    if (!(await hasConsent(env, uid))) { await consentPrompt(env, uid); return text("ok"); }
     const s = await userSettings(env, uid);
     ctx.waitUntil((async () => { try { await tg(env, "sendChatAction", { chat_id: uid, action: "typing" }); const rv = await weekReview(env, uid, addDays(localDate(new Date(), s.tz), 1)); await send(env, uid, rv || "Для разбора нужно хотя бы 3 дня с записями за последнюю неделю 🙂", { reply_markup: openBtn(env) }); } catch (e) { await send(env, uid, "Не получилось сделать разбор: " + esc(String(e.message || e))); } })());
   } else if (cmd === "/week") {
+    if (!(await hasConsent(env, uid))) { await consentPrompt(env, uid); return text("ok"); }
     const s = await userSettings(env, uid);
     await send(env, uid, await weekText(env, uid, localDate(new Date(), s.tz)), { reply_markup: openBtn(env) });
+  } else if (cmd === "/delete") {
+    const tok = rid(10); await kput(env, `delc:${uid}`, tok, 60 * 10);
+    await send(env, uid, "🗑 <b>Удалить все твои данные?</b>\n\nСотрутся дневник, вес, меню, блюда, цикл, настройки и напоминания — на сервере и в резервных копиях. Ты выйдешь из семьи, тренер потеряет доступ. Вернуть данные будет нельзя.\n\nКопия в мини-приложении Telegram и на телефоне сотрётся при следующем открытии дневника. Переписку с ботом можно удалить в самом Telegram (удалить чат).",
+      { reply_markup: { inline_keyboard: [[{ text: "Да, удалить всё", callback_data: `del:${tok}` }], [{ text: "Отмена", callback_data: "del:no" }]] } });
   } else if (cmd === "/stop") {
     const s = await userSettings(env, uid); s.log.on = false; s.summary.on = false; s.weigh.on = false; s.weekly.on = false;
     await kput(env, `s:${uid}`, s);
@@ -840,11 +898,28 @@ async function onCallback(env, cq) {
     if (cq.message) await tg(env, "editMessageText", { chat_id: uid, message_id: cq.message.message_id, text: "↩️ Запись отменена.", parse_mode: "HTML" });
     return;
   }
+  if ((data.startsWith("sg:") || data.startsWith("rp:")) && !(await hasConsent(env, uid))) { await ack("Нужно согласие — открой дневник"); await consentPrompt(env, uid); return; }
   if (data.startsWith("sg:")) {
     const [, tok, idx] = data.split(":"), opts = await kget(env, `sg:${uid}:${tok}`), o = opts && opts[+idx];
     if (!o) { await ack("Варианты устарели — спроси ещё раз"); return; }
     await ack("Записываю…");
     await logAndReply(env, uid, await userSettings(env, uid), null, 0, o.items);
+    return;
+  }
+  if (data.startsWith("del:")) {
+    const tok = data.slice(4), want = await kget(env, `delc:${uid}`);
+    if (tok === "no" || !want || want !== tok) {
+      await ack(tok === "no" ? "Отменено" : "Запрос устарел — отправь /delete ещё раз");
+      if (cq.message) await tg(env, "editMessageText", { chat_id: uid, message_id: cq.message.message_id, text: tok === "no" ? "Удаление отменено." : "Запрос на удаление устарел. Отправь /delete ещё раз.", parse_mode: "HTML" });
+      return;
+    }
+    await ack("Удаляю…");
+    try {
+      await deleteAccount(env, uid);
+      if (cq.message) await tg(env, "editMessageText", { chat_id: uid, message_id: cq.message.message_id, text: "✅ Все твои данные удалены с сервера. Копии в Telegram и на телефоне сотрутся при следующем открытии дневника.\n\nЕсли захочешь начать заново — просто нажми /start.", parse_mode: "HTML" });
+    } catch (e) {
+      await send(env, uid, "Не получилось удалить до конца — попробуй ещё раз: /delete. Повтор безопасен.");
+    }
     return;
   }
   if (data.startsWith("rp:")) {
@@ -866,6 +941,7 @@ function looksLikeRecipe(t) {
 }
 async function botMessage(env, m) {
   const uid = String(m.from.id), s = await userSettings(env, uid);
+  if (!(await hasConsent(env, uid))) { await consentPrompt(env, uid); return; }
   await ensureUser(env, uid, m.from.first_name || "");
   await tg(env, "sendChatAction", { chat_id: uid, action: "typing" });
   try {
@@ -887,16 +963,17 @@ async function botMessage(env, m) {
 const BOT_DESC = "Дневник похудения 🌿\n\n🍽 Считает калории и БЖУ: пишешь продукт и граммы — остальное посчитается само\n✍️ Можно писать прямо в чат: «на обед 150 г гречки и котлета» — или голосовым\n🔗 Пришли ссылку на рецепт — сохраню блюдо с калориями\n📷 Еда по фото, штрихкоду и этикетке\n📅 Меню на неделю и список покупок\n⚖️ Вес, прогресс и прогноз до цели\n❤️ Шаги и активность из «Здоровья» на iPhone\n👨‍👩‍👧 Общее меню для семьи\n🔔 Напоминания и итоги дня и недели\n\nНажми «Старт» — и начнём.";
 const BOT_SHORT = "Считаю калории по продукту и граммам, фото и штрихкоду. Меню на неделю, вес, шаги и напоминания 🌿";
 async function botDescribe(env) {
-  if (await env.KV.get("desc:v5")) return;
+  if (await env.KV.get("desc:v6")) return;
   await tg(env, "setMyDescription", { description: BOT_DESC });
   await tg(env, "setMyShortDescription", { short_description: BOT_SHORT });
   await tg(env, "setMyCommands", { commands: BOT_COMMANDS });
-  await env.KV.put("desc:v5", "1");
+  await env.KV.put("desc:v6", "1");
 }
 const BOT_COMMANDS = [
   { command: "start", description: "Начать" },
   { command: "help", description: "Что я умею и как записывать еду" },
   { command: "login", description: "Код для входа в приложение на экране «Домой»" },
+  { command: "delete", description: "Удалить все мои данные" },
   { command: "today", description: "Итог сегодняшнего дня" },
   { command: "week", description: "Отчёт за неделю" },
   { command: "review", description: "Разбор недели от ИИ-нутрициолога" },
@@ -930,6 +1007,7 @@ const HELP_TEXT = `<b>Как записывать еду прямо здесь, 
 /review — разбор недели от ИИ-нутрициолога (по воскресеньям приходит сам)
 /login — код для входа в приложение на экране «Домой»
 /stop — выключить напоминания
+/delete — удалить все мои данные
 /help — эта подсказка
 
 Всё остальное — меню, вес, прогресс, семья — в дневнике 👇`;
@@ -945,7 +1023,7 @@ async function sendNewsOnce(env) {
   if (await env.KV.get("news:v1")) return;
   await env.KV.put("news:v1", "1");
   const users = await kget(env, "users", []);
-  for (const uid of users) { try { await send(env, uid, NEWS_TEXT, { reply_markup: openBtn(env) }); } catch (e) {} }
+  for (const uid of users) { try { if (await hasConsent(env, uid)) await send(env, uid, NEWS_TEXT, { reply_markup: openBtn(env) }); } catch (e) {} }
 }
 function introText(name) {
   return `Привет${name ? ", " + esc(name) : ""}! 🌿 Я — <b>Дневник похудения</b>.
@@ -1002,9 +1080,10 @@ async function trainerApi(env, user, p, body, req, url) {
     const tp = await kget(env, `tp:${me}`); if (tp) { tp.on = false; await kput(env, `tp:${me}`, tp); }
     return json({ ok: true });
   }
+  const trainerOn = async () => { const tp = await kget(env, `tp:${me}`); return !!(tp && tp.on); };
   if (p === "trainer/client") {   // дневник клиента — только просмотр
     const c = String(url.searchParams.get("uid") || body.uid || "");
-    if (!(await kget(env, `tl:${me}`, [])).includes(c)) return json({ error: "Нет доступа к этому клиенту" }, 403);
+    if (!(await trainerOn()) || !(await kget(env, `tl:${me}`, [])).includes(c) || !(await hasConsent(env, c))) return json({ error: "Нет доступа к этому клиенту" }, 403);
     const pre = `u:${c}:d:`, docs = {}, since = addDays(new Date().toISOString().slice(0, 10), -90);
     for (const [k, v] of await env.KV.listPrefix(pre)) {
       const key = k.slice(pre.length);
@@ -1015,7 +1094,7 @@ async function trainerApi(env, user, p, body, req, url) {
   }
   if (p === "trainer/comment") {
     const c = String(body.client || ""), txt = String(body.text || "").trim().slice(0, 1000);
-    if (!(await kget(env, `tl:${me}`, [])).includes(c)) return json({ error: "Нет доступа к этому клиенту" }, 403);
+    if (!(await trainerOn()) || !(await kget(env, `tl:${me}`, [])).includes(c)) return json({ error: "Нет доступа к этому клиенту" }, 403);
     if (!txt || !/^\d{4}-\d{2}-\d{2}$/.test(body.date || "")) return json({ error: "Пустой комментарий" }, 400);
     const tp = await kget(env, `tp:${me}`), tname = (tp && tp.name) || user.name;
     const it = { id: rid(10), from: me, name: tname, date: body.date, meal: body.meal ? String(body.meal).slice(0, 80) : null, text: txt, at: Date.now() };
@@ -1060,6 +1139,7 @@ async function trainerApi(env, user, p, body, req, url) {
   }
   if (p === "coach/leave") {
     const t = String(body.trainer || "");
+    if (!(await kget(env, `cl:${me}`, [])).includes(t)) return json({ ok: true, ...(await coachInfo(env, me)) });
     await kput(env, `cl:${me}`, (await kget(env, `cl:${me}`, [])).filter(x => x !== t));
     await kput(env, `tl:${t}`, (await kget(env, `tl:${t}`, [])).filter(x => x !== me));
     await send(env, t, `${esc(user.name)} закрыл(а) тебе доступ к своему дневнику.`);
@@ -1128,7 +1208,13 @@ const DEFAULT_SETTINGS = {
   weigh: { on: true, day: 1, time: "08:30" },  // 1 = понедельник
   weekly: { on: true, time: "20:00" },          // по воскресеньям
 };
+/* ---------------- согласие на обработку данных ---------------- */
+// Без согласия сервер не сохраняет и не обрабатывает данные человека: доступны только само согласие, удаление и выход.
+async function hasConsent(env, uid) { const c = await kget(env, `cs:${uid}`); return !!(c && c.ok); }
+const CONSENT_PROMPT = "Чтобы я записывал еду, считал калории и присылал напоминания, нужно твоё согласие на обработку данных. Открой дневник — там можно прочитать, какие данные мы храним, и дать согласие.\n\nБез согласия бот не сохраняет твои сообщения, а дневник работает только на телефоне.";
+async function consentPrompt(env, uid) { await send(env, uid, CONSENT_PROMPT, { reply_markup: openBtn(env, "Открыть дневник") }); }
 async function ensureUser(env, uid, name) {
+  if (!(await hasConsent(env, uid))) return;   // без согласия не заводим пользователя
   const list = await kget(env, "users", []);
   if (!list.includes(uid)) { list.push(uid); await kput(env, "users", list); await env.KV.put(`j:${uid}`, String(Date.now())); }
   if (name) await env.KV.put(`n:${uid}`, name);
@@ -1146,11 +1232,24 @@ const fmt1 = n => (Math.round(n * 10) / 10).toLocaleString("ru-RU");
 /* ---------------- API для приложения ---------------- */
 async function api(req, env, url, user, ctx) {
   const p = url.pathname.slice(5), body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+  if (p === "hello" || p === "data" || (p === "consent" && req.method === "POST")) {   // сигнал «аккаунт удалён» доходит до устройства даже без согласия — чтобы оно стёрло старую копию
+    const g = await goneInfo(env, user.id, req);
+    if (g && !g.cleared) return json({ ok: false, wiped: g.at, accepted: {}, newer: {} });
+  }
+  if (p === "consent") {   // {accept: true|false, v: "версия текста"}
+    if (req.method === "GET") return json({ consent: await kget(env, `cs:${user.id}`) });
+    const rec = { ok: body.accept === true, v: String(body.v || "").slice(0, 20), at: Date.now() };
+    await kput(env, `cs:${user.id}`, rec);
+    if (rec.ok) await ensureUser(env, user.id, user.name);
+    return json({ ok: true, consent: rec });
+  }
+  if (!["account/delete", "account/wiped", "logout"].includes(p) && !(await hasConsent(env, user.id))) return json({ error: "consent", message: "Нужно согласие на обработку данных" }, 403);
   if (p === "hello") {
     await ensureUser(env, user.id, user.name);
     const s = await userSettings(env, user.id);
     if (typeof body.tz === "number" && body.tz !== s.tz) { s.tz = body.tz; await kput(env, `s:${user.id}`, s); }
-    return json({ ok: true, settings: s, ai: !!env.ANTHROPIC_API_KEY, family: await env.KV.get(`uf:${user.id}`) });
+    const g = await goneInfo(env, user.id, req);
+    return json({ ok: true, settings: s, ai: !!env.ANTHROPIC_API_KEY, family: await env.KV.get(`uf:${user.id}`), ...(g && !g.cleared ? { wiped: g.at } : {}) });
   }
   if (p === "settings") {
     if (req.method === "POST") { const s = { ...(await userSettings(env, user.id)), ...body }; await kput(env, `s:${user.id}`, s); return json({ ok: true, settings: s }); }
@@ -1167,11 +1266,14 @@ async function api(req, env, url, user, ctx) {
     return json({ docs, me: { id: user.id, name: user.name }, health: await kget(env, `hp:${user.id}`), coach: await coachInfo(env, user.id) });
   }
   if (p === "data") {   // {docs:{key:{v,at}}} — побеждает более свежая запись
+    const g = await goneInfo(env, user.id, req);
+    if (g && !g.cleared) return json({ ok: false, wiped: g.at, accepted: {}, newer: {} });   // устройство ещё хранит копию, сделанную до удаления
+    const gone = g ? g.at : 0;
     const pre = `u:${user.id}:d:`, incoming = body.docs || {}, keys = Object.keys(incoming).filter(k => /^[A-Za-z0-9_\-]{1,64}$/.test(k)).slice(0, 400);
     const cur = {}; for (const [k, v] of await env.KV.listPrefix(pre)) { try { cur[k.slice(pre.length)] = JSON.parse(v); } catch (e) {} }
     const write = [], accepted = {}, newer = {};
     for (const k of keys) {
-      const d = incoming[k]; if (!d || typeof d.at !== "number") continue;
+      const d = incoming[k]; if (!d || typeof d.at !== "number" || d.at <= gone) continue;
       const size = JSON.stringify(d).length; if (size > 1_500_000) continue;
       if (!cur[k] || d.at > (cur[k].at || 0)) { write.push([pre + k, JSON.stringify({ v: d.v === undefined ? null : d.v, at: d.at })]); accepted[k] = d.at; }
       else if (cur[k].at > d.at) newer[k] = cur[k];
@@ -1183,6 +1285,11 @@ async function api(req, env, url, user, ctx) {
     let k = await env.KV.get(`uhk:${user.id}`);
     if (!k) { k = rid(20); await env.KV.put(`hk:${k}`, user.id); await env.KV.put(`uhk:${user.id}`, k); }
     return json({ key: k });
+  }
+  if (p === "account/wiped") {   // устройство стёрло свою старую копию — его новые записи снова принимаются
+    const g = await goneInfo(env, user.id, req);
+    if (g && g.dev && !g.cleared) await kput(env, `gone:${user.id}`, { at: g.at, dev: [...(await kget(env, `gone:${user.id}`)).dev || [], g.dev].slice(-50) }, 60 * 60 * 24 * 180);
+    return json({ ok: true });
   }
   if (p === "account/delete") {
     if (body.confirm !== "УДАЛИТЬ") return json({ error: "Нет подтверждения" }, 400);
@@ -1198,10 +1305,14 @@ async function api(req, env, url, user, ctx) {
   if (p === "ai/menu") { try { const q = await menuQuota(env, user.id); if (q) return json({ error: q }, 429); const r = await aiMenu(env, user, body); await menuQuota(env, user.id, true); return json(r); } catch (e) { return json({ error: String(e.message || e) }, 502); } }
   if (p === "off/search") return await offProxy(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(url.searchParams.get("q") || "")}&page_size=40&langs=ru,en&fields=${OFF_FIELDS}`, ctx);
   if (p.startsWith("off/product/")) return await offProxy(`${OFF}/api/v2/product/${encodeURIComponent(p.slice(12))}.json?fields=${OFF_FIELDS}`, ctx);
-  if (p === "file") {
-    const id = rid(16), name = String(body.name || "file").replace(/[\\/]/g, "_");
-    if ((body.b64 || "").length > 8_000_000) return json({ error: "too big" }, 413);
-    await kput(env, `f:${id}`, { name, mime: body.mime || "application/octet-stream", b64: body.b64 || "", inline: !!body.inline }, 60 * 60);
+  if (p === "file") {   // временный файл для скачивания (выгрузка, календарь, карточка прогресса) — только безопасные типы
+    const mime = fileType(body.mime);
+    if (!mime) return json({ error: "Такой тип файла не поддерживается" }, 415);
+    const b64 = String(body.b64 || "");
+    if (!b64 || !/^[A-Za-z0-9+/=\s]+$/.test(b64)) return json({ error: "Пустой или повреждённый файл" }, 400);
+    if (b64.length > FILE_MAX_B64) return json({ error: "Файл слишком большой (максимум 3 МБ)" }, 413);
+    const id = rid(16), name = safeFileName(body.name);
+    await kput(env, `f:${id}`, { name, mime, b64, inline: !!body.inline && FILE_TYPES[mime].inline }, 60 * 60);
     return json({ url: `${url.origin}/f/${id}/${encodeURIComponent(name)}` });
   }
   if (p === "send-photo") {
@@ -1223,6 +1334,7 @@ async function healthIn(req, env, url) {
   const g = k => (b[k] != null && b[k] !== "") ? b[k] : url.searchParams.get(k);
   const key = String(g("k") || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   const uid = key ? await env.KV.get(`hk:${key}`) : null;
+  if (uid && !(await hasConsent(env, uid))) return text("⚠️ Сначала открой дневник и дай согласие на обработку данных — без него шаги не сохраняются.");
   if (!uid) return text("❌ Дневник не узнал тебя. Открой дневник → «Профиль» → «Здоровье» → «Обновить из Здоровья».");
   const s = await userSettings(env, uid), date = localDate(new Date(), s.tz);
   const steps = Math.max(0, Math.round(hnum(g("s")))), active = Math.max(0, Math.round(hnum(g("a"))));
@@ -1232,14 +1344,28 @@ async function healthIn(req, env, url) {
   return text(parts.length ? `✅ В дневник: ${parts.join(", ")}` : "⚠️ Из «Здоровья» ничего не пришло. Разреши команде доступ к шагам, энергии и весу: «Настройки» → «Здоровье» → «Доступ к данным».");
 }
 
+// Разрешённые типы временных файлов. HTML/SVG/JS запрещены: на домене сервера не должен исполняться чужой код.
+const FILE_TYPES = {
+  "image/png": { inline: true }, "image/jpeg": { inline: true },
+  "text/calendar": { inline: true, text: true }, "text/csv": { inline: false, text: true },
+};
+const FILE_MAX_B64 = 4_200_000;   // ≈ 3 МБ файла
+const fileType = m => { const t = String(m || "").split(";")[0].trim().toLowerCase(); return FILE_TYPES[t] ? t : null; };
+const safeFileName = n => (String(n || "file").replace(/[\x00-\x1f\x7f\\/"<>:|?*]/g, "_").replace(/^\.+/, "").trim().slice(0, 100) || "file");
 async function serveFile(env, url) {
-  const id = url.pathname.split("/")[2];
-  const f = await kget(env, `f:${id}`);
+  const id = String(url.pathname.split("/")[2] || "").replace(/[^a-z0-9]/g, "");
+  const f = id ? await kget(env, `f:${id}`) : null;
   if (!f) return text("Файл устарел — создай заново в приложении", 404);
-  const bytes = Uint8Array.from(atob(f.b64), c => c.charCodeAt(0));
+  const mime = fileType(f.mime);
+  const inline = !!(mime && f.inline && FILE_TYPES[mime].inline);
+  let bytes; try { bytes = Uint8Array.from(atob(f.b64), c => c.charCodeAt(0)); } catch (e) { return text("Файл повреждён", 410); }
   return new Response(bytes, { headers: {
-    "content-type": f.mime,
-    "content-disposition": `${f.inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(f.name)}`,
+    "content-type": mime ? (FILE_TYPES[mime].text ? `${mime}; charset=utf-8` : mime) : "application/octet-stream",
+    "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(safeFileName(f.name))}`,
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox",
+    "referrer-policy": "no-referrer",
+    "cache-control": "private, no-store",
     "access-control-allow-origin": "*",
   } });
 }
@@ -1304,7 +1430,7 @@ async function family(env, user, p, body, req) {
   }
   if (p === "family/create") {
     if (code) return json({ error: "Ты уже в семье" }, 400);
-    let c; do { c = rid(6).toUpperCase(); } while (await env.KV.get(`fam:${c}`));
+    let c; do { c = rid(8).toUpperCase(); } while (await env.KV.get(`fam:${c}`));
     const f = { code: c, title: String(body.title || "Наша семья").slice(0, 40), owner: user.id, members: [{ id: user.id, name: user.name }], feed: [], menu: null, shop: {} };
     await save(f); await env.KV.put(`uf:${user.id}`, c);
     return json({ family: f, me: user.id, bot: await botUsername(env) });
@@ -1312,6 +1438,10 @@ async function family(env, user, p, body, req) {
   if (p === "family/join") {
     const c = String(body.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const f = await load(c); if (!f) return json({ error: "Семья с таким кодом не найдена" }, 404);
+    if (code && code !== c) {   // выходим из прежней семьи, чтобы не оставаться в ней «призраком»
+      const old = await load(code);
+      if (old) { old.members = old.members.filter(m => m.id !== user.id); if (!old.members.length) await env.KV.delete(`fam:${code}`); else { if (old.owner === user.id) old.owner = old.members[0].id; await save(old); } }
+    }
     if (!f.members.find(m => m.id === user.id)) {
       f.members.push({ id: user.id, name: user.name }); await save(f);
       for (const m of f.members) if (m.id !== user.id) await send(env, m.id, `👋 <b>${esc(user.name)}</b> присоединился(ась) к семье «${esc(f.title)}»`);
@@ -1345,7 +1475,9 @@ async function family(env, user, p, body, req) {
     return json({ family: f, me: user.id });
   }
   if (p === "family/shop") {
-    f.shop = f.shop || {}; if (body.bought) f.shop[body.key] = user.name; else delete f.shop[body.key];
+    f.shop = f.shop || {}; f.shopBy = f.shopBy || {};
+    const key = String(body.key || "").slice(0, 120); if (!key) return json({ error: "key" }, 400);
+    if (body.bought) { f.shop[key] = user.name; f.shopBy[key] = user.id; } else { delete f.shop[key]; delete f.shopBy[key]; }
     await save(f); return json({ family: f, me: user.id });
   }
   return json({ error: "unknown" }, 404);
@@ -1360,6 +1492,7 @@ async function runCron(env, now) {
   const users = await kget(env, "users", []);
   for (const uid of users) {
     try {
+      if (!(await hasConsent(env, uid))) continue;   // без согласия — никаких напоминаний и сводок
       const s = await userSettings(env, uid);
       const ln = localNow(now, s.tz), hm = `${String(ln.getUTCHours()).padStart(2, "0")}:${ln.getUTCMinutes() < 30 ? "00" : "30"}`;
       const today = ln.toISOString().slice(0, 10), dow = ln.getUTCDay();

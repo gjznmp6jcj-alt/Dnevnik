@@ -134,6 +134,11 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .asst-m.a{align-self:flex-start;background:var(--surface2);border-bottom-left-radius:4px}
 .asst-opt{background:var(--surface);border:1px solid var(--line,rgba(0,0,0,.08));border-radius:12px;padding:10px 12px;margin-top:8px;white-space:normal}
 .asst-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}.asst-chips .chip{white-space:nowrap;flex:none}
+.cs-bg{position:fixed;inset:0;z-index:300;background:rgba(10,20,14,.55);display:flex;align-items:flex-end;justify-content:center}
+.cs-box{background:var(--surface);color:var(--fg);width:100%;max-width:600px;max-height:92vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:20px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.cs-box h2{margin:0;font-size:19px}.cs-box ul{margin:0;padding-left:20px;display:grid;gap:6px}.cs-box li{line-height:1.4}
+.cs-act{position:sticky;bottom:calc(-18px - env(safe-area-inset-bottom,0px));background:var(--surface);display:flex;flex-direction:column;gap:8px;padding:10px 0 calc(18px + env(safe-area-inset-bottom,0px));margin-bottom:calc(-18px - env(safe-area-inset-bottom,0px));box-shadow:0 -10px 16px -12px rgba(0,0,0,.25)}
+.cs-sec{font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#6b7a70);margin-top:4px}
 .ig-bg{position:fixed;inset:0;z-index:200;background:rgba(10,20,14,.55);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:max(16px,env(safe-area-inset-top,0px)) 16px 0}
 .ig-card{background:var(--surface);border-radius:18px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 .ig-card ol{margin:10px 0 0;padding-left:22px;display:grid;gap:10px}.ig-card li{line-height:1.35}
@@ -388,6 +393,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <label class="row small" style="gap:8px"><input type="checkbox" id="tipsOn" style="width:auto" checked><span class="grow">Показывать подсказки в разделах</span></label>
       <button id="tipsAgain">Показать подсказки заново</button>
     </div>
+    <div class="card stack" id="consentCard"></div>
     <div class="card stack">
       <h2>Удалить мои данные</h2>
       <p class="note" style="margin:0">Сотрёт все твои записи, вес, меню, блюда и настройки — на этом телефоне, в Telegram и на сервере. Восстановить будет нельзя, поэтому сначала можешь сохранить резервную копию выше.</p>
@@ -399,7 +405,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-26 · 47</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-27 · 49</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -584,7 +590,7 @@ const Store = {
     try{ this.docs=JSON.parse(localStorage.getItem(LS_KEY)||"{}"); }catch(e){ this.docs={}; }
     try{ this.dirty=new Set(JSON.parse(localStorage.getItem(LS_DIRTY)||"[]")); }catch(e){}
     this.localOk=this._testLocal();
-    const cloud = !!(TG && TG.CloudStorage && TG.isVersionAtLeast && TG.isVersionAtLeast("6.9"));
+    const cloud = !!(TG && TG.CloudStorage && TG.isVersionAtLeast && TG.isVersionAtLeast("6.9")) && consentOk();   // без согласия — только память телефона
     this.mode = cloud ? "tg" : "local";
     onReady();
     if(cloud) this.syncFromCloud();
@@ -1800,7 +1806,7 @@ const aiOn=()=>typeof serverInfo!=="undefined"&&serverInfo&&serverInfo.ai&&typeo
 function recipeImportCard(){
   return `<div class="card stack rcp-card" style="gap:10px">
     <div class="row" style="gap:12px;align-items:flex-start;flex-wrap:nowrap"><div class="asst-ic" aria-hidden="true">🔗</div><div class="stack" style="gap:3px;flex:1;min-width:0"><b style="font-size:17px">Рецепт по ссылке — посчитаю сам</b><span class="small">Нашла рецепт на сайте, в блоге или в Instagram? Скопируй <b>ссылку</b> или сам <b>текст рецепта</b> и вставь сюда — калории, БЖУ и вес порции посчитаются автоматически.</span></div></div>
-    ${aiOn()?`<textarea id="rcpIn" rows="2" placeholder="https://… или текст рецепта с ингредиентами" aria-label="Ссылка или текст рецепта" style="font:inherit;font-size:15px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;resize:vertical"></textarea>
+    ${consentDeclined()?noConsentNote():aiOn()?`<textarea id="rcpIn" rows="2" placeholder="https://… или текст рецепта с ингредиентами" aria-label="Ссылка или текст рецепта" style="font:inherit;font-size:15px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;resize:vertical"></textarea>
     <div class="row" style="gap:8px"><button class="grow" id="rcpPaste">Вставить из буфера</button><button class="primary grow" id="rcpGo">Посчитать</button></div>
     <div class="note" id="rcpMsg" style="margin:0"></div>`:`<p class="note" style="margin:0">Работает, когда выполнен вход через Telegram. А ещё можно просто отправить ссылку боту @${BOT_USERNAME} — блюдо появится здесь.</p>`}
   </div>`;
@@ -2301,19 +2307,20 @@ async function loadConfig(){
   try{ const r=await fetch("config.json",{cache:"no-store"}); if(r.ok){ const j=await r.json(); SERVER=String(j.server||"").trim().replace(/\/+$/,""); if(j.healthShortcut) HEALTH_SC=String(j.healthShortcut).trim(); } }catch(e){}
   try{ const o=localStorage.getItem("serverOverride"); if(o) SERVER=o.trim().replace(/\/+$/,""); }catch(e){}
 }
-const serverReady=()=>!!(SERVER && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
+const serverReady=()=>!!(SERVER && consentOk() && ((TG && TG.initData) || (typeof sessionToken!=="undefined" && sessionToken)));
 const NET_HINT="нет связи с сервером. В России он открывается только через VPN: включи VPN для всего телефона (прокси внутри Telegram не подходит — он работает только для чатов) и попробуй ещё раз";
 async function sapi(path,body,method){
   try{ return await sapiOnce(path,body,method); }
   catch(e){ if(e&&!e.code&&e.message===NET_HINT&&!/^ai\/|^family\/post|^account\//.test(path)){ await new Promise(r=>setTimeout(r,1500)); return await sapiOnce(path,body,method); } throw e; }
 }
 async function sapiOnce(path,body,method){
-  const h={"content-type":"application/json"}; if(TG&&TG.initData) h["x-tg-init"]=TG.initData; else if(sessionToken) h["x-session"]=sessionToken;
+  const h={"content-type":"application/json","x-device":deviceId()}; if(TG&&TG.initData) h["x-tg-init"]=TG.initData; else if(sessionToken) h["x-session"]=sessionToken;
   const ms=path==="ai/menu"?150000:path.startsWith("ai/")?90000:15000, ctl=new AbortController(), tm=setTimeout(()=>ctl.abort(),ms);
   let r; try{ r=await fetch(SERVER+"/api/"+path,{method:method||(body?"POST":"GET"),headers:h,body:body?JSON.stringify(body):undefined,cache:"no-store",signal:ctl.signal}); }
   catch(e){ clearTimeout(tm); if(e&&e.name==="AbortError") throw new Error(path.startsWith("ai/")?`ИИ не успел ответить за ${Math.round(ms/1000)} секунд — попробуй ещё раз`:"сервер не ответил за 15 секунд — похоже, его адрес не открывается в этой сети"); throw new Error(NET_HINT); }
   clearTimeout(tm);
   let j=null; try{ j=await r.json(); }catch(e){}
+  if(r.status===403&&j&&j.error==="consent"){ const c=consentState(); if(c&&c.sent){ try{ localStorage.removeItem("dnevnik-consent"); }catch(e){} setTimeout(()=>openConsent(true),0); } const er=new Error("нужно согласие на обработку данных"); er.code=403; throw er; }
   if(!r.ok){ const er=new Error((j&&j.error==="auth")?"нужно войти заново":((j&&j.error)||("сервер ответил "+r.status))); er.code=r.status; if(r.status===401&&!TG&&sessionToken) setTimeout(onSessionLost,0); throw er; }
   return j;
 }
@@ -2323,11 +2330,14 @@ async function initServer(){
   renderServerCards();
   resumeLogin();
   if(!serverReady()) return;
+  if(await sendConsentIfNeeded()) return;
   for(let k=0;k<3;k++){ try{ serverInfo=await sapi("hello",{tz:-new Date().getTimezoneOffset()}); break; }catch(e){ serverInfo={error:errText(e)}; if(e&&e.code) break; await new Promise(r=>setTimeout(r,1500*(k+1))); } }
+  if(serverInfo&&serverInfo.wiped&&await applyRemoteWipe(serverInfo.wiped)) return;
   if(serverInfo&&serverInfo.error){ clearTimeout(initServer._t); initServer._n=(initServer._n||0)+1; if(initServer._n<20) initServer._t=setTimeout(()=>{ if(document.visibilityState==="visible") initServer(); },15000); }
   else initServer._n=0;
   renderServerCards(); if(tab==="diary") renderDiary();
   { const bh=$("botHint"); if(bh) bh.hidden=!(serverInfo&&!serverInfo.error); }
+  if(serverInfo&&serverInfo.wiped&&await applyRemoteWipe(serverInfo.wiped)) return;
   if(serverInfo&&!serverInfo.error){ await Sync.pull(); if(serverInfo.family) famLoad(true); trLoad(); }
   syncDay(today()); syncDay(addDays(today(),-1));
 }
@@ -2381,6 +2391,7 @@ function applyHealthData(h){
   return true;
 }
 async function runHealthShortcut(){
+  if(consentDeclined()){ openConsent(); return; }
   if(!serverReady()){ toast(TG?"Сервер не подключён":"Сначала войди через Telegram"); return; }
   try{
     const r=await sapi("health/key",{});
@@ -2403,6 +2414,7 @@ function healthDiaryBtn(){
 function healthCardHtml(){
   const intro=`<p class="note" style="margin:0">Шаги, активные калории и сегодняшний вес — из «Здоровья», часов и умных весов.</p>`;
   if(!SERVER) return intro+HEALTH_GUIDE;
+  if(consentDeclined()) return intro+noConsentNote();
   if(!serverReady()) return intro+`<p class="note" style="margin:0">Войди через Telegram — и подключить «Здоровье» можно будет в два нажатия.</p>`;
   if(!HEALTH_SC) return intro+`<p class="note" style="margin:0">Скоро здесь будет подключение в два нажатия.</p>`+HEALTH_BUILD()+`<button id="hcRun">Проверить команду</button>`;
   if(hcGet()!=="added") return intro+`
@@ -2599,6 +2611,7 @@ function famShopItems(entries){
 let famMenuCache={code:null,entries:[]};
 async function renderFamily(){
   const el=$("menuFamily"); if(!el) return;
+  if(consentDeclined()){ el.innerHTML=`<div class="empty">Семейная группа хранит общее меню на сервере. ${noConsentNote()}</div>`; return; }
   if(!serverReady()){ el.innerHTML=`<div class="empty">Семейная группа работает через сервер приложения. ${TG?"Подключи его по инструкции — «Профиль» → «Сервер».":"Открой приложение в Telegram."}<br><br>А отправлять блюда и меню родным можно уже сейчас — кнопками «Отправить семье».</div>`; return; }
   if(!famState){
     el.innerHTML=`<div class="card stack"><h2>Создать семью</h2><p class="note" style="margin:0">Один ведёт меню и делится блюдами — у остальных всё появляется в группе, а бот присылает уведомления.</p>
@@ -2743,7 +2756,7 @@ const Sync={
     if(!this.ready||!serverReady()) return;
     const keys=Object.keys(this.pending); if(!keys.length) return; this.pending={};
     const docs={}; keys.forEach(k=>{ docs[k]={v:Store.docs[k]===undefined?null:Store.docs[k], at:docAt[k]||Date.now()}; });
-    try{ const r=await sapi("data",{docs}); if(r&&r.newer) this.apply(r.newer); this.status(true); }
+    try{ const r=await sapi("data",{docs}); if(r&&r.wiped&&await applyRemoteWipe(r.wiped)) return; if(r&&r.newer) this.apply(r.newer); this.status(true); }
     catch(e){ keys.forEach(k=>this.pending[k]=1); this.status(false); setTimeout(()=>this.schedule(),8000); }
   },
   apply(map){
@@ -2831,7 +2844,7 @@ async function logout(){
 }
 function renderLoginCard(){
   const el=$("loginCard"); if(!el) return;
-  const need = !TG && SERVER && !sessionToken;
+  const need = !TG && SERVER && !sessionToken && consentOk();
   el.hidden=!need; if(!need) return;
   const codeRow=`<div class="row" style="gap:8px;flex-wrap:nowrap"><input id="loginCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Код из бота" aria-label="Код из бота" style="flex:1;min-width:0;letter-spacing:.2em"><button id="loginCodeGo">Войти</button></div><div class="note" id="loginMsg" style="margin:0"></div>`;
   el.innerHTML = loginNonce
@@ -2987,6 +3000,7 @@ async function trLoad(){
 }
 function renderCoachCards(){
   const el=$("coachCards"); if(!el) return;
+  if(consentDeclined()){ el.innerHTML=`<div class="card stack"><h2>Кабинет тренера</h2>${noConsentNote()}</div>`; return; }
   if(!serverReady()||!serverInfo||serverInfo.error){ el.innerHTML=""; return; }
   let html="";
   // клиент: мои тренеры
@@ -3341,14 +3355,109 @@ function bind(){
   };
 }
 
+/* ================= СОГЛАСИЕ НА ОБРАБОТКУ ДАННЫХ ================= */
+// Версия текста: если текст поменяется — согласие спросим заново.
+const CONSENT_V="2026-10-27";
+function consentState(){ try{ const x=JSON.parse(localStorage.getItem("dnevnik-consent")||"null"); if(x&&x.v===CONSENT_V) return x; }catch(e){} return null; }
+function consentOk(){ const c=consentState(); return !!(c&&c.ok); }
+function consentDeclined(){ const c=consentState(); return !!(c&&!c.ok); }
+function consentSave(ok){ try{ localStorage.setItem("dnevnik-consent",JSON.stringify({v:CONSENT_V,ok,at:Date.now(),sent:false})); }catch(e){} }
+const noConsentNote=()=>`<p class="note" style="margin:0">Отключено: нет согласия на обработку данных. <button class="ghost" data-consent-open="1" style="padding:0;font-size:inherit">Дать согласие</button></p>`;
+async function sendConsentIfNeeded(){
+  const c=consentState(); if(!c||!c.ok||c.sent) return false;
+  try{ const r=await sapiOnce("consent",{accept:true,v:CONSENT_V}); if(r&&r.wiped) return await applyRemoteWipe(r.wiped); c.sent=true; localStorage.setItem("dnevnik-consent",JSON.stringify(c)); }catch(e){}
+  return false;
+}
+const CONSENT_HTML=`
+  <div class="cs-sec">Что мы храним</div>
+  <ul class="small">
+    <li>Telegram ID и имя.</li>
+    <li>Дневник питания, вес и замеры, профиль (пол, возраст, рост, цель), свои блюда, меню и покупки.</li>
+    <li><b>Сведения о здоровье:</b> вес, питание, даты менструального цикла, шаги и активность из «Здоровья».</li>
+    <li>Настройки напоминаний, семья и тренер — если ими пользуешься.</li>
+  </ul>
+  <div class="cs-sec">Зачем</div>
+  <p class="small" style="margin:0">Чтобы считать норму калорий, вести дневник, работать с ботом, присылать напоминания и итоги, показывать прогресс и давать доступ семье и тренеру — только тем, кого ты пригласишь сама.</p>
+  <div class="cs-sec">Где и кто обрабатывает</div>
+  <ul class="small">
+    <li>Данные хранятся на сервере приложения у Cloudflare — <b>за пределами России</b>, и в облаке Telegram (для мини-приложения).</li>
+    <li>Сообщения боту проходят через Telegram.</li>
+    <li>Для фото еды, разбора текста, советов, меню и рецептов текст и фото <b>без имени и ID</b> отправляются в сервис ИИ Anthropic (США). Голосовые расшифровывает Cloudflare.</li>
+    <li>По штрихкоду в базу Open Food Facts уходит только номер штрихкода.</li>
+  </ul>
+  <div class="cs-sec">Сроки и твои права</div>
+  <p class="small" style="margin:0">Храним, пока ты пользуешься дневником. Удалить всё можно в любой момент: «Профиль» → «Удалить мои данные» или командой /delete в боте. Согласие можно отозвать в «Профиле».</p>
+  <div class="cs-sec">Если не принять</div>
+  <p class="small" style="margin:0">Дневник будет работать <b>только на этом телефоне</b>: записи, поиск продуктов, штрихкоды, этикетки, меню вручную, покупки, вес, цикл. <b>Отключатся:</b> бот, синхронизация с Telegram и другими устройствами, фото еды и помощник, меню от ИИ, рецепт по ссылке, семья, тренер, напоминания, «Здоровье», вход в приложении на экране «Домой».</p>`;
+function openConsent(first){
+  let r=$("csRoot"); if(!r){ r=document.createElement("div"); r.id="csRoot"; document.body.appendChild(r); }
+  const c=consentState();
+  r.innerHTML=`<div class="cs-bg" role="dialog" aria-modal="true" aria-label="Согласие на обработку данных"><div class="cs-box">
+    <h2>Согласие на обработку данных</h2>
+    <p class="small" style="margin:0">Чтобы дневник считал норму, хранил записи и работал с ботом, нужно твоё согласие на обработку персональных данных, в том числе сведений о здоровье: вес, питание, цикл, активность.</p>
+    <p class="small" style="margin:0">Данные хранятся на защищённых серверах и могут передаваться сервисам, которые обеспечивают работу приложения (хостинг, Telegram, распознавание фото и текста), в том числе за рубежом. Отозвать согласие и удалить данные можно в любой момент в «Профиле».</p>
+    <p class="small" style="margin:0">Без согласия дневник будет работать только на этом телефоне, а бот, синхронизация, ИИ-функции, семья, тренер и напоминания будут отключены.</p>
+    <details class="small"><summary style="cursor:pointer;color:var(--accent);font-weight:600">Подробнее: какие данные и кто обрабатывает</summary><div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">${CONSENT_HTML}</div></details>
+    <p class="small" style="margin:4px 0 0">Нажимая «Принимаю», ты даёшь согласие на обработку персональных данных, включая сведения о здоровье, для работы дневника.</p>
+    <div class="cs-act"><button class="primary" id="csYes">Принимаю</button>
+    <button id="csNo">${c&&c.ok?"Отозвать согласие":"Не принимаю"}</button>
+    ${!first?`<button class="ghost" id="csClose">Закрыть</button>`:""}
+    <div class="note" id="csMsg" style="margin:0"></div></div>
+  </div></div>`;
+  $("csYes").onclick=()=>{ const was=consentOk(); consentSave(true); r.innerHTML=""; if(!was){ toast("Спасибо! Включаю все функции…"); setTimeout(()=>location.reload(),700); } };
+  $("csNo").onclick=async()=>{
+    const was=consentOk();
+    if(was){ $("csMsg").textContent="Отзываю…"; try{ if(serverReady()) await sapiOnce("consent",{accept:false,v:CONSENT_V}); }catch(e){} }
+    consentSave(false); r.innerHTML="";
+    toast("Хорошо. Дневник работает только на этом телефоне");
+    if(was) setTimeout(()=>location.reload(),900); else renderAll();
+  };
+  const cl=$("csClose"); if(cl) cl.onclick=()=>{ r.innerHTML=""; };
+}
+function renderConsentCard(){
+  const el=$("consentCard"); if(!el) return;
+  const c=consentState();
+  el.innerHTML=`<h2>Обработка данных</h2>
+    <p class="small" style="margin:0">${c&&c.ok?`✅ Согласие дано ${shortD(new Date(c.at).toISOString().slice(0,10))}. Все функции включены.`:c?"Согласие не дано — дневник работает только на этом телефоне, часть функций отключена.":"Решение ещё не принято."}</p>
+    <div class="row"><button class="grow" data-consent-open="1">${c&&c.ok?"Что храним · отозвать":"Прочитать и дать согласие"}</button></div>`;
+}
+document.addEventListener("click",e=>{ const b=e.target.closest&&e.target.closest("[data-consent-open]"); if(b){ e.preventDefault(); openConsent(false); } });
+(function hookConsent(){ const _ra=renderAll; renderAll=function(){ _ra(); try{ if(tab==="profile") renderConsentCard(); }catch(e){} }; })();
+
 /* ================= УДАЛЕНИЕ ДАННЫХ ================= */
 async function wipeLocal(){
   try{ if(TG&&TG.CloudStorage&&typeof tgCall==="function"){ const ks=await tgCall("getKeys"); for(let i=0;i<ks.length;i+=10) await tgCall("removeItems",ks.slice(i,i+10)); } }catch(e){}
   try{ const ks=[]; for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i)); ks.forEach(k=>{ if(/^dnevnik|^asst-log|^hc-state|^calTimes|^ocrLang/.test(k)||k.includes("dnevnik")) localStorage.removeItem(k); }); }catch(e){}
 }
+// Метка устройства: нужна только для очистки после удаления аккаунта (какие копии уже стёрты)
+let _dev=null;
+function deviceId(){
+  if(_dev) return _dev;
+  try{ _dev=localStorage.getItem("dnevnik-dev"); }catch(e){}
+  if(!_dev){ _dev=Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>"abcdefghijkmnpqrstuvwxyz23456789"[b%32]).join(""); try{ localStorage.setItem("dnevnik-dev",_dev); }catch(e){} }
+  return _dev;
+}
+// Аккаунт удалялся (с другого устройства или командой /delete в боте) — стираем старую копию на этом устройстве
+// и в облаке Telegram, потом сообщаем серверу, что это устройство чистое. Новые записи после этого сохраняются как обычно.
+let wipingNow=false;
+async function applyRemoteWipe(ts){
+  if(!ts) return false; if(wipingNow) return true;
+  wipingNow=true;
+  try{ Sync.ready=false; }catch(e){}
+  try{ Store.set=function(){}; Store._push=function(){}; Store._saveLocal=function(){}; Store.syncFromCloud=async function(){}; }catch(e){}
+  try{ await Store.q; }catch(e){}
+  await wipeLocal();
+  _dev=null; deviceId();   // новая метка — это уже «чистое» устройство
+  try{ await sapi("account/wiped",{}); }catch(e){}
+  try{ Store.docs={}; }catch(e){}
+  toast("Данные удалены по твоему запросу — старая копия на этом устройстве тоже стёрта");
+  setTimeout(()=>location.replace(location.pathname),1800);
+  return true;
+}
 function openDeleteAccount(){
   openSheet(`<div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Удалить все данные?</h2><button class="icon" data-close aria-label="Закрыть">✕</button></div>
-    <p class="small" style="margin:0">Будут удалены: дневник питания, вес и замеры, меню и покупки, свои блюда и продукты, цикл, настройки и напоминания. Ты выйдешь из семьи, тренер потеряет доступ.${typeof serverReady==="function"&&serverReady()?" Данные сотрутся и на сервере.":""}</p>
+    <p class="small" style="margin:0">Будут удалены: дневник питания, вес и замеры, меню и покупки, свои блюда и продукты, цикл, настройки и напоминания, твои записи в ленте семьи и комментарии, если ты тренер. Ты выйдешь из семьи, тренер потеряет доступ.${typeof serverReady==="function"&&serverReady()?" Данные сотрутся на сервере и в резервных копиях, а копии на других устройствах и в Telegram — при их следующем открытии.":""}</p>
+    <p class="note" style="margin:0">Переписку с ботом Telegram хранит сам — её можно удалить, удалив чат с ботом.</p>
     <p class="small" style="margin:0"><b>Вернуть их будет нельзя.</b> Чтобы подтвердить, напиши слово <b>УДАЛИТЬ</b>:</p>
     <input id="delConf" autocomplete="off" placeholder="УДАЛИТЬ" aria-label="Подтверждение">
     <button class="primary" id="delGo" style="background:var(--warn);border-color:var(--warn)" disabled>Удалить навсегда</button>
@@ -3358,10 +3467,14 @@ function openDeleteAccount(){
     $("delGo").disabled=true; $("delMsg").textContent="Удаляю…";
     try{
       if(typeof serverReady==="function"&&serverReady()) await sapi("account/delete",{confirm:"УДАЛИТЬ"});
+      try{ Sync.ready=false; Store.set=function(){}; Store._push=function(){}; Store._saveLocal=function(){}; await Store.q; }catch(e){}
       await wipeLocal();
       try{ Store.docs={}; }catch(e){}
-      $("delMsg").textContent="Готово. Все данные удалены.";
-      setTimeout(()=>{ if(TG){ try{ TG.close(); }catch(e){} } location.replace(location.pathname); },1500);
+      try{ Sync.ready=false; }catch(e){}
+      // не перезапускаем приложение сразу, чтобы оно не создало аккаунт заново само по себе
+      document.body.innerHTML=`<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;font-family:var(--body);background:var(--bg);color:var(--fg)"><div style="font-size:44px">✓</div><h1 style="margin:0">Все данные удалены</h1><p class="small" style="max-width:340px;margin:0">С сервера, из резервных копий и с этого устройства. Копии на других устройствах сотрутся при их следующем открытии. Переписку с ботом можно удалить в Telegram, удалив чат.</p><button class="primary" id="startOver" style="margin-top:8px">Начать заново</button></div>`;
+      document.getElementById("startOver").onclick=()=>location.replace(location.pathname);
+      if(TG){ setTimeout(()=>{ try{ TG.close(); }catch(e){} },2500); }
     }catch(e){ $("delGo").disabled=false; $("delMsg").textContent="Не получилось: "+errText(e)+". Попробуй ещё раз или напиши нам."; }
   };
 }
@@ -3580,8 +3693,9 @@ function onReady(){
   go(profile()?"diary":"profile");
   if(/[?&]install=1/.test(location.search) && !TG && !IS_STANDALONE) setTimeout(showInstallGuide,400);
   hideSplash();
-  setTimeout(()=>{ tipsReady=true; renderTipsCard(); maybeTour(tab); },1700);
-  checkStartParam();
+  if(!consentState()){ openConsent(true); }
+  setTimeout(()=>{ tipsReady=true; renderTipsCard(); if(consentState()) maybeTour(tab); },1700);
+  if(consentOk()) checkStartParam();
   initServer();
 }
 
