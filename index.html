@@ -406,7 +406,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 60</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 61</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2472,7 +2472,13 @@ function healthCardHtml(){
     <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Готово, всё настроила</button>`;
   return intro+`
     <p class="small" style="margin:0">✅ Подключено. Каждый вечер бот пришлёт шаги — нажми в сообщении <b>«Добавить в дневник»</b>.</p>
-    <details><summary class="small muted">Проверить сейчас</summary><p class="small" style="margin:6px 0">Открой «Команды» и нажми на «${SC_NAME}». Через пару секунд придёт сообщение от бота.</p></details>
+    <details><summary class="small"><b>Как обновить в любой момент</b></summary><ul class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
+      <li><b>Постучать по телефону.</b> Настройки → Универсальный доступ → Касание → «Коснуться задней панели» → «Коснуться дважды» → «${SC_NAME}». Два раза стукнула по задней крышке — через пару секунд бот пришлёт шаги.</li>
+      <li><b>Siri.</b> Скажи: «Привет, Siri, ${SC_NAME.toLowerCase()}».</li>
+      <li><b>Пункт управления.</b> Свайп вниз от правого верхнего угла → «+» → «Добавить элемент» → «Быстрая команда» → «${SC_NAME}».</li>
+      <li><b>Несколько раз в день сами.</b> Сделай ещё одну автоматизацию — например, на 12:00.</li>
+      <li>Или открой «Команды» и нажми «${SC_NAME}».</li>
+    </ul></details>
     <details><summary class="small muted">Автоматизация на вечер</summary>${auto}</details>
     <details><summary class="small muted">Бот пишет «Код не подошёл»</summary><p class="small" style="margin:6px 0">Скопируй код ещё раз и вставь его в команде вместо старого (первое действие «Текст»).</p><button class="ghost small" id="hsCopy" style="padding:0">Скопировать мой код</button></details>
     <button class="ghost small" id="hcReset" style="padding:0;align-self:flex-start">Подключить заново</button>`;
