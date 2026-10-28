@@ -23,6 +23,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Дневник">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script>if(/[?&]run=health/.test(location.search)){var u="shortcuts://run-shortcut?name="+encodeURIComponent("Здоровье в дневник");location.replace(u);document.addEventListener("DOMContentLoaded",function(){document.body.innerHTML='<div style="font:17px/1.4 -apple-system,system-ui,sans-serif;padding:60px 24px;text-align:center;color:#1b2a20;background:#F2F5F1;min-height:100vh"><p>Открываю «Команды»…</p><p><a href="'+u+'" style="display:inline-block;margin-top:12px;padding:14px 22px;border-radius:14px;background:#2E6B4F;color:#fff;text-decoration:none;font-weight:600">Запустить команду</a></p><p style="font-size:14px;color:#5a6b60;margin-top:24px">Команда сама вернёт тебя в дневник с шагами.</p></div>';});}</script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700&display=swap">
@@ -406,7 +407,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 56</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 57</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2420,6 +2421,8 @@ function applyHealthData(h){
 }
 function runHealthShortcut(){
   // команда сама соберёт шаги, активность и вес и откроет дневник в Telegram по ссылке — сервер не нужен
+  // из Telegram напрямую «Команды» не открываются — открываем страницу в браузере, она запускает команду
+  if(TG){ try{ TG.openLink(APP_URL+"?run=health"); return; }catch(e){} }
   location.href=`shortcuts://run-shortcut?name=${encodeURIComponent(SC_NAME)}`;
 }
 document.addEventListener("visibilitychange",()=>{
