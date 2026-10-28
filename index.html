@@ -406,7 +406,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 59</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 60</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2459,9 +2459,10 @@ function healthCardHtml(){
   if(serverReady()&&!hsCode) setTimeout(hsFetch,50);
   const intro=`<p class="note" style="margin:0">Шаги, активные калории и вес — из «Здоровья», часов и умных весов. Настраивается один раз, дальше бот сам присылает цифры с кнопкой «Добавить в дневник».</p>`;
   const auto=`<ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
-      <li>Приложение «Команды» → внизу «Автоматизация» → «+».</li>
-      <li>«Время суток» → например 21:30, «Ежедневно» → «Запускать сразу» → «Далее».</li>
-      <li>Выбери команду «${SC_NAME}». Готово.</li></ol>`;
+      <li>Приложение «Команды» → внизу вкладка <b>«Автоматизация»</b> → <b>«+»</b> (или «Новая автоматизация»).</li>
+      <li>Выбери <b>«Время суток»</b> и поставь время, например 21:30.</li>
+      <li>«Повтор» — <b>«По дням»</b>. Ниже отметь <b>«Немедленный запуск»</b> — иначе айфон каждый раз будет спрашивать. Нажми <b>«Далее»</b>.</li>
+      <li>Выбери команду <b>«${SC_NAME}»</b>. Готово.</li></ol>`;
   if(hcGet()!=="added") return intro+`
     <ol class="small" style="padding-left:18px;margin:4px 0;display:flex;flex-direction:column;gap:10px">
       <li><button class="primary" id="hsCopy" style="width:100%">1. Скопировать мой код</button></li>
