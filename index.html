@@ -406,7 +406,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 61</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 61.1</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -589,7 +589,9 @@ const tgCall = (fn,...args) => new Promise((res,rej)=>{ const t=setTimeout(()=>r
 const Store = {
   mode:"loading", docs:{}, localOk:true, parts:{}, dirty:new Set(), q:Promise.resolve(), synced:false, busy:0, failed:false,
   async init(){
+    const pre=this.docs;   // то, что успели записать до загрузки, — поверх сохранённого, а не вместо
     try{ this.docs=JSON.parse(localStorage.getItem(LS_KEY)||"{}"); }catch(e){ this.docs={}; }
+    Object.assign(this.docs,pre);
     try{ this.dirty=new Set(JSON.parse(localStorage.getItem(LS_DIRTY)||"[]")); }catch(e){}
     this.localOk=this._testLocal();
     const cloud = !!(TG && TG.CloudStorage && TG.isVersionAtLeast && TG.isVersionAtLeast("6.9")) && consentOk();   // без согласия — только память телефона
@@ -630,6 +632,7 @@ const Store = {
   get(k){ return this.docs[k]; },
   set(k,v,quiet){
     this.docs[k]=v;
+    if(this.mode==="loading") return;   // хранилище ещё не прочитано — не затираем сохранённое
     if(this.mode==="tg"){ this.dirty.add(k); this._push(k); if(this.synced) setSyncMode(); }
     this._saveLocal(); if(!this.localOk && this.mode!=="tg") setSyncMode();
     if(!quiet) renderAll();
@@ -3704,9 +3707,11 @@ const TG_MOBILE = !!(TG && /^(ios|android)/.test(TG.platform||""));
 function tgHomeAdd(){
   try{ TG.addToHomeScreen(); }catch(e){ toast("Не получилось. Обнови Telegram и попробуй ещё раз"); }
 }
+// писать в хранилище можно только после того, как оно прочитало сохранённые записи
+const whenStore=fn=>{ const w=()=>{ if(typeof Store!=="undefined"&&Store.mode!=="loading") fn(); else setTimeout(w,300); }; w(); };
 if(TG_HOME){
-  try{ TG.onEvent("homeScreenAdded",()=>{ installSet({installed:today()}); try{ renderAll(); }catch(_){} toast("Иконка добавлена 📲"); }); }catch(e){}
-  try{ TG.checkHomeScreenStatus(st=>{ if(st==="added"&&!installState().installed){ installSet({installed:today()}); try{ renderAll(); }catch(_){} } }); }catch(e){}
+  try{ TG.onEvent("homeScreenAdded",()=>whenStore(()=>{ installSet({installed:today()}); try{ renderAll(); }catch(_){} toast("Иконка добавлена 📲"); })); }catch(e){}
+  try{ TG.checkHomeScreenStatus(st=>whenStore(()=>{ if(st==="added"&&!installState().installed){ installSet({installed:today()}); try{ renderAll(); }catch(_){} } })); }catch(e){}
 }
 if(TG_MOBILE){ try{ if(TG.isVersionAtLeast("8.0")&&!TG.isFullscreen) TG.requestFullscreen(); }catch(e){} }
 function installSet(v){ Store.set("installPrompt",{...installState(),...v}); }
