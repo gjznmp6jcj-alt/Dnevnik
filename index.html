@@ -406,7 +406,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-27 · 51</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-27 · 54</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2391,19 +2391,22 @@ async function offViaServer(kind,arg){
 /* ================= «ЗДОРОВЬЕ» НА iPHONE (через «Команды») ================= */
 function applyHealth(sp){
   // h_<шаги>_<активные ккал>_<вес×10>[_<гггг-мм-дд>]
-  const a=sp.split("_"); const steps=+a[1]||0, active=+a[2]||0, w10=+a[3]||0, date=/^\d{4}-\d{2}-\d{2}$/.test(a[4]||"")?a[4]:today();
+  const a=sp.split("_"), n=x=>Math.round(+String(x||"").replace(/[^0-9]/g,"")||0);
+  const steps=n(a[1]), active=n(a[2]), wv=n(a[3]), date=/^\d{4}-\d{2}-\d{2}$/.test(a[4]||"")?a[4]:today();
+  const w10 = wv>=400 ? wv : (wv>20 ? wv*10 : 0);   // вес можно прислать ×10 (725) или в кг (72)
   const day=clone(getDay(date)); day.health={steps,active,at:Date.now()}; putDay(date,day);
   const parts=[]; if(steps) parts.push(`${fmt(steps)} шагов`); if(active) parts.push(`${fmt(active)} ккал активности`);
   if(w10>200 && w10<4000){ const kg=w10/10; const entries=weights().filter(x=>x.date!==date); const old=weights().find(x=>x.date===date); entries.push({date,w:kg,...(old&&old.waist?{waist:old.waist}:{})}); Store.set("weights",{entries}); parts.push(`вес ${fmt(kg,1)} кг`); }
   curDate=date; go("diary");
   toast(parts.length?"Из «Здоровья»: "+parts.join(", "):"Из «Здоровья» пришли пустые данные");
 }
-const SC_NAME="Дневник Здоровье";
-let healthWait=0;
-// отметка «команда уже добавлена» — в аккаунте, чтобы не добавлять её второй раз из Telegram или с экрана «Домой»
-const hcGet=()=>{ const v=(Store.get("hc")||{}).state; if(v) return v; try{ return localStorage.getItem("hc-state")||""; }catch(e){ return ""; } };
-const hcSet=v=>{ try{ Store.set("hc",{state:v}); }catch(e){} try{ localStorage.setItem("hc-state",v); }catch(e){} };
-function hcConnect(){ hcSet("pending"); openExternal(HEALTH_SC); }
+const SC_NAME="Здоровье в дневник";
+// ссылка iCloud на готовую команду (новую, без сервера) — из config.json → healthShortcut2
+let HEALTH_SC2="";
+fetch("config.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{ if(j&&j.healthShortcut2){ HEALTH_SC2=String(j.healthShortcut2).trim(); try{ renderServerCards(); renderDiary(); }catch(e){} } }).catch(()=>{});
+const hcGet=()=>{ const v=(Store.get("hc2")||{}).state; if(v) return v; try{ return localStorage.getItem("hc2-state")||""; }catch(e){ return ""; } };
+const hcSet=v=>{ try{ Store.set("hc2",{state:v}); }catch(e){} try{ localStorage.setItem("hc2-state",v); }catch(e){} };
+function hcConnect(){ if(!HEALTH_SC2){ go("profile"); setTimeout(()=>{ const c=$("healthCard"); if(c) c.scrollIntoView({behavior:"smooth",block:"start"}); },300); return; } hcSet("pending"); openExternal(HEALTH_SC2); }
 function applyHealthData(h){
   if(!h||!/^\d{4}-\d{2}-\d{2}$/.test(h.date||"")||!h.at) return false;
   const day=clone(getDay(h.date)); if(day.health&&(day.health.at||0)>=h.at) return false;
@@ -2415,60 +2418,52 @@ function applyHealthData(h){
   toast(parts.length?"Из «Здоровья»: "+parts.join(", "):"Из «Здоровья» пришли пустые данные — проверь доступ команды к «Здоровью»");
   return true;
 }
-async function runHealthShortcut(){
-  if(consentDeclined()){ openConsent(); return; }
-  if(!serverReady()){ toast(TG?"Сервер не подключён":"Сначала войди через Telegram"); return; }
-  try{
-    const r=await sapi("health/key",{});
-    healthWait=Date.now()+180000;
-    location.href=`shortcuts://run-shortcut?name=${encodeURIComponent(SC_NAME)}&input=text&text=${encodeURIComponent(r.key)}`;
-  }catch(e){ toast("Не получилось: "+errText(e)); }
+function runHealthShortcut(){
+  // команда сама соберёт шаги, активность и вес и откроет дневник в Telegram по ссылке — сервер не нужен
+  location.href=`shortcuts://run-shortcut?name=${encodeURIComponent(SC_NAME)}`;
 }
 document.addEventListener("visibilitychange",()=>{
-  if(!document.hidden && hcGet()==="pending"){ hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} setTimeout(()=>{ toast("Подтягиваю данные из «Здоровья»…"); runHealthShortcut(); },700); return; }
-  if(document.hidden||Date.now()>healthWait||!serverReady()) return;
-  [700,2500,6000].forEach(t=>setTimeout(()=>{ Sync.lastPull=0; Sync.pull(); },t));
+  if(!document.hidden && hcGet()==="pending"){ hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} }
 });
 function healthDiaryBtn(){
-  if(!HEALTH_SC||!serverReady()||curDate!==today()) return "";
+  if(!IS_IOS||curDate!==today()) return "";
   if(hcGet()!=="added") return `<div class="row" style="margin-top:12px;gap:10px;align-items:center"><button class="grow" id="hcConnect">❤️ Подключить «Здоровье»</button><button class="ghost small" id="hcHave" style="padding:0">Уже добавлена</button></div>`;
   const h=getDay(today()).health, t=h&&h.at?new Date(h.at):null;
   const when=t?` · обновлено в ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`:"";
   return `<button id="hcRun" style="margin-top:12px;width:100%">↻ Обновить из «Здоровья»</button>${when?`<div class="note" style="margin-top:4px;text-align:center">Шаги и активность${when}</div>`:""}`;
 }
 function healthCardHtml(){
-  const intro=`<p class="note" style="margin:0">Шаги, активные калории и сегодняшний вес — из «Здоровья», часов и умных весов.</p>`;
-  if(!SERVER) return intro+HEALTH_GUIDE;
-  if(consentDeclined()) return intro+noConsentNote();
-  if(!serverReady()) return intro+`<p class="note" style="margin:0">Войди через Telegram — и подключить «Здоровье» можно будет в два нажатия.</p>`;
-  if(!HEALTH_SC) return intro+`<p class="note" style="margin:0">Скоро здесь будет подключение в два нажатия.</p>`+HEALTH_BUILD()+`<button id="hcRun">Проверить команду</button>`;
-  if(hcGet()!=="added") return intro+`
+  const intro=`<p class="note" style="margin:0">Шаги, активные калории и сегодняшний вес — из «Здоровья», часов и умных весов. Данные идут прямо с телефона в дневник.</p>`;
+  if(hcGet()!=="added") return intro+(HEALTH_SC2?`
     <button class="primary" id="hcConnect">Подключить «Здоровье»</button>
-    <p class="note" style="margin:0">Айфон покажет команду — нажми «Добавить быструю команду» и вернись сюда. Дальше всё само: в первый раз только разреши доступ к «Здоровью».</p>
-    <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Команда уже добавлена</button>`;
+    <p class="note" style="margin:0">Айфон покажет команду — нажми «Добавить быструю команду» и вернись сюда.</p>`:HEALTH_GUIDE)+`
+    <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Команда «${SC_NAME}» уже есть</button>`;
   return intro+`
     <button class="primary" id="hcRun">Обновить из «Здоровья»</button>
-    <details><summary class="small muted">Пишет «Не удалось найти быструю команду»?</summary><p class="small" style="margin:6px 0">В приложении «Команды» должна быть ровно одна команда с названием <b>${SC_NAME}</b>, без цифр. Удали лишние копии («${SC_NAME} 1», «… 2»): долгое нажатие → «Удалить», а оставшуюся переименуй ровно в «${SC_NAME}». Если команды нет совсем — <button class="ghost small" id="hcAdd" style="padding:0">добавь её заново</button>.</p></details>
+    <p class="note" style="margin:0">Откроются «Команды», потом дневник сам откроется снова — с шагами и весом.</p>
+    <details><summary class="small muted">Пишет «Не удалось найти быструю команду»?</summary><p class="small" style="margin:6px 0">В приложении «Команды» должна быть команда с названием ровно <b>${SC_NAME}</b>. Переименуй её: долгое нажатие → «Переименовать». Лишние копии удали.</p></details>
+    <details><summary class="small muted">Как собрать команду заново</summary>${HEALTH_GUIDE}</details>
     <details><summary class="small"><b>Чтобы приходило само каждый вечер</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
       <li>Приложение «Команды» → внизу «Автоматизация» → «+».</li>
       <li>«Время суток» → например 21:30, «Ежедневно» → «Запускать сразу» → «Далее».</li>
-      <li>Выбери команду «${SC_NAME}». Готово.</li>
-    </ol><p class="note" style="margin:0">Сначала хотя бы раз нажми «Обновить из „Здоровья“» — так команда запомнит, что данные твои.</p></details>`;
+      <li>Выбери команду «${SC_NAME}». Готово — в это время дневник сам откроется в Telegram с данными.</li>
+    </ol></details>
+    <button class="ghost small" id="hcReset" style="padding:0;align-self:flex-start">Подключить заново</button>`;
 }
 const HEALTH_BUILD=()=>`<details><summary class="small"><b>Собрать команду (делается один раз — потом все добавляют её в одно нажатие)</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
 <li>Открой «Команды» → «+» → назови команду ровно <b>${SC_NAME}</b>.</li>
 <li>Действия по порядку — инструкция у Claude в чате.</li>
 <li>Адрес для действия «Получить содержимое URL»: <code>${esc(SERVER)}/h</code></li>
 </ol></details>`;
-const HEALTH_GUIDE=`<details><summary><b>Как настроить (5 минут)</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
-<li>Открой приложение <b>«Команды»</b> → «+» → назови команду «Дневник».</li>
-<li>Добавь действие <b>«Найти образцы здоровья»</b>: Тип — <b>Шаги</b>, Дата начала — <b>Сегодня</b>. Затем действие <b>«Вычислить статистику»</b> → <b>Сумма</b>.</li>
-<li>Ещё раз <b>«Найти образцы здоровья»</b>: Тип — <b>Активная энергия</b>, Дата начала — <b>Сегодня</b> → <b>«Вычислить статистику»</b> → <b>Сумма</b>.</li>
-<li>Для веса: <b>«Найти образцы здоровья»</b>: Тип — <b>Вес</b>, сортировка — <b>Дата начала, сначала новые</b>, ограничение — <b>1</b>. Затем <b>«Вычислить»</b>: результат × 10 и <b>«Округлить число»</b>.</li>
-<li>Добавь действие <b>«Текст»</b> и собери в нём: <code>https://t.me/${BOT_USERNAME}?startapp=h_</code>[шаги]<code>_</code>[энергия]<code>_</code>[вес×10] — вставляй результаты нажатием на «Переменная». Если вес не нужен — поставь в конце <code>_0</code>.</li>
-<li>Последнее действие — <b>«Открыть URL»</b>.</li>
-<li>Чтобы данные приходили сами: «Команды» → <b>«Автоматизация»</b> → «+» → <b>«Время суток»</b>, например 21:00, ежедневно → «Запускать сразу» → выбери команду «Дневник».</li>
-</ol><p class="note" style="margin:0">Шаги и активность покажутся в дневнике за день, а вес попадёт во вкладку «Вес». Часы, браслеты и умные весы попадают сюда, если они синхронизируются со «Здоровьем».</p></details>`;
+const HEALTH_GUIDE=`<details><summary><b>Как собрать команду (5 минут, один раз)</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
+<li>Открой приложение <b>«Команды»</b> → «+» → назови команду ровно <b>${SC_NAME}</b>.</li>
+<li><b>Шаги.</b> Действие <b>«Найти образцы здоровья»</b>: Тип — <b>Шаги</b>, Дата начала — <b>Сегодня</b>. Потом <b>«Вычислить статистику»</b> → <b>Сумма</b>. Потом <b>«Округлить число»</b>.</li>
+<li><b>Активность.</b> Снова <b>«Найти образцы здоровья»</b>: Тип — <b>Активная энергия</b>, Дата начала — <b>Сегодня</b> → <b>«Вычислить статистику»</b> → <b>Сумма</b> → <b>«Округлить число»</b>.</li>
+<li><b>Вес</b> (можно пропустить). <b>«Найти образцы здоровья»</b>: Тип — <b>Вес</b>, сортировка — <b>Дата начала, сначала новые</b>, ограничение — <b>1</b>. Потом <b>«Вычислить»</b>: × 10. Потом <b>«Округлить число»</b>.</li>
+<li>Действие <b>«Текст»</b>. Впиши <code>https://t.me/${BOT_USERNAME}?startapp=h_</code>, потом вставь округлённые шаги (кнопка «Переменная»), знак <code>_</code>, округлённую активность, <code>_</code>, округлённый вес. Без веса — допиши <code>_0</code>. Пробелов быть не должно.</li>
+<li>Последнее действие — <b>«Открыть URL-адреса»</b>.</li>
+<li>Нажми ▶︎ внизу: разреши доступ к «Здоровью» — откроется дневник с шагами.</li>
+</ol></details>`;
 
 /* ================= КАЛЕНДАРЬ ================= */
 const icsEsc=s=>String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\n/g,"\\n");
@@ -2687,8 +2682,8 @@ function renderServerCards(){
   const el=$("integrCards"); if(!el) return;
   const s=serverInfo&&serverInfo.settings;
   el.innerHTML=`
-    ${TG?`<div class="card stack"><h2>Отдельное приложение на экране</h2><p class="note" style="margin:0">Чтобы дневник открывался с главного экрана сам, без Telegram: открой его в Safari, нажми «Поделиться» → «На экран „Домой“», а потом войди через Telegram — записи будут те же.</p><button class="primary" id="openSafari">Открыть в Safari</button></div>`:""}
-    <div class="card stack"><h2>«Здоровье» на iPhone</h2>${healthCardHtml()}</div>
+    ${TG&&TG_HOME?`<div class="card stack"><h2>Иконка на экране «Домой»</h2><p class="note" style="margin:0">${installState().installed?"Иконка уже добавлена. Если удалила — можно добавить снова.":"Дневник будет открываться с иконки на телефоне, сразу на весь экран."}</p><button class="primary" id="tgHomeBtn">Добавить иконку</button></div>`:TG?`<div class="card stack"><h2>Иконка на экране «Домой»</h2><p class="note" style="margin:0">Эта версия Telegram (${esc(String(TG.version||"?"))}, ${esc(String(TG.platform||"?"))}) пока не умеет добавлять иконку. Обнови Telegram в App Store, закрой его полностью и открой дневник снова — здесь появится кнопка «Добавить иконку».</p><button class="primary" id="tgUpdate">Обновить Telegram</button></div>`:""}
+    <div class="card stack" id="healthCard"><h2>«Здоровье» на iPhone</h2>${healthCardHtml()}</div>
     <div class="card stack"><h2>Выгрузка</h2><p class="note" style="margin:0">Дневник, итоги по дням, вес и тренировки одним файлом — откроется в Excel или «Таблицах».</p><button id="csvBtn">Выгрузить в Excel</button><div class="note" id="csvMsg"></div></div>
     <div class="card stack"><h2>Сервер и бот</h2>
       ${!TG&&!SERVER?`<p class="note" style="margin:0">Сервер не подключён.</p>`
@@ -2715,6 +2710,8 @@ function bindIntegrations(){
   document.addEventListener("click",e=>{
     const b=e.target.closest("button"); if(!b) return; const d=b.dataset;
     switch(b.id){
+      case "tgHomeBtn": tgHomeAdd(); break;
+      case "tgUpdate": openExternal(IS_IOS?"https://apps.apple.com/app/telegram-messenger/id686449807":"https://play.google.com/store/apps/details?id=org.telegram.messenger"); break;
       case "openSafari": openExternal(APP_URL+"?install=1"); break;
       case "loginGo": startLogin(); break;
       case "hcAdd": hcConnect(); break;
@@ -2722,6 +2719,7 @@ function bindIntegrations(){
       case "hcConnect": hcConnect(); break;
       case "hcHave": hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} break;
       case "hcRun": runHealthShortcut(); break;
+      case "hcReset": hcSet(""); renderServerCards(); try{ renderDiary(); }catch(e){} break;
       case "loginCancel": clearInterval(loginTimer); loginNonce=null; try{ localStorage.removeItem(LN_KEY); }catch(e){} renderLoginCard(); break;
       case "logoutBtn": logout(); break;
       case "csvBtn": deliverFile(`Дневник ${today()}.csv`,"text/csv;charset=utf-8",buildCSV(),{msgEl:"csvMsg",hint:"Файл готов — открой его в «Файлах» или Excel."}); break;
@@ -3535,7 +3533,7 @@ const FEATURES=[
  ["Тело и здоровье","cycle","🌸","Учёт цикла","Перед месячными вес часто растёт на 0,5–2 кг из-за воды. Приложение предупредит об этом заранее и отметит эти дни на графике — меньше поводов расстраиваться.","Вкладка «Вес» → «Цикл» → «Начались сегодня» в первый день месячных. Или напиши боту «начались».",()=>{ go("weight"); flashEl("#cycleCard"); },()=>cycleStarts().length>0,()=>cycleOn()],
  ["Тело и здоровье","fiber","🥦","Клетчатка","Кроме белков, жиров и углеводов считается клетчатка — она даёт сытость. Норма — 25 г в день для женщин, 30 г для мужчин.","Ничего делать не нужно — смотри полоску «Клетчатка» под БЖУ в Дневнике.",()=>{ go("diary"); flashEl(".fibrow"); },null],
  ["Тело и здоровье","share","🏆","Карточка прогресса","Красивая картинка «минус N кг» для сторис или подруг — приятно и мотивирует.","Вкладка «Прогресс» → «Карточка прогресса — поделиться».",()=>{ go("progress"); flashEl("#progCard",500); },null],
- ["Связь и удобство","install","📲","Приложение на экране «Домой»","Дневник открывается с иконки за секунду, как обычное приложение, — без поиска бота в Telegram.","Нажми «Попробовать» — покажу по шагам, что нажать.",()=>{ closeSheet(); if(TG_HOME) tgHomeAdd(); else if(TG) openExternal(APP_URL+"?install=1"); else showInstallGuide(); },()=>IS_STANDALONE||!!installState().installed],
+ ["Связь и удобство","install","📲","Приложение на экране «Домой»","Дневник открывается с иконки за секунду, как обычное приложение, — без поиска бота в Telegram.","Нажми «Попробовать» — покажу по шагам, что нажать.",()=>{ closeSheet(); if(TG_HOME) tgHomeAdd(); else if(TG){ go("profile"); } else showInstallGuide(); },()=>IS_STANDALONE||!!installState().installed],
  ["Связь и удобство","remind","⏰","Напоминания от бота","Бот напомнит записать еду, если день пустой, и взвеситься; вечером пришлёт итог дня, в воскресенье — отчёт за неделю.","Профиль → «Сервер и бот» → «Напоминания бота»: отметь нужные, выбери время → «Сохранить напоминания».",()=>{ go("profile"); flashEl("#rmLog,#integrCards",500); },null],
  ["Связь и удобство","coach","🏋️","Тренер или нутрициолог","Открой доступ своему тренеру — он увидит дневник и сможет оставлять комментарии. А если ты сама тренер — веди здесь клиентов.","Профиль → «Кабинет тренера».",()=>{ go("profile"); flashEl("#coachCards",500); },null],
  ["Связь и удобство","excel","📄","Выгрузка в Excel","Весь дневник, вес и тренировки одним файлом — для себя или для врача.","Профиль → «Выгрузить в Excel».",()=>{ go("profile"); flashEl("#csvBtn",500); },null]
@@ -3689,7 +3687,7 @@ function renderInstallNudge(){
   const el=$("installNudge"); if(!el) return;
   if(!installWanted()||curDate!==today()){ el.hidden=true; return; }
   el.hidden=false;
-  const where = TG_HOME ? "Одна кнопка — Telegram сам добавит иконку." : TG ? "Откроется Safari — там покажу, куда нажать. Займёт 20 секунд." : IS_IOS ? "Две кнопки в Safari — покажу, какие." : "Иконка появится на главном экране.";
+  const where = TG_HOME ? "Одна кнопка — Telegram сам добавит иконку." : TG ? "Сначала обнови Telegram — старая версия не умеет добавлять иконку." : IS_IOS ? "Две кнопки в Safari — покажу, какие." : "Иконка появится на главном экране.";
   el.innerHTML=`<div class="row" style="gap:12px;align-items:flex-start;flex-wrap:nowrap"><div style="font-size:30px;line-height:1;flex:none;width:36px">📲</div><div class="stack" style="gap:4px;flex:1;min-width:0"><b>Поставь дневник на экран «Домой»</b><span class="small">Будет открываться с иконки, как обычное приложение — без поиска бота в Telegram. Записи общие с ботом. ${where}</span></div></div>
     <button class="primary" id="instGo">Установить</button>
     <div class="row" style="justify-content:space-between"><button class="ghost small" id="instLater" style="padding-left:0">Не сейчас</button><button class="ghost small" id="instOff">Больше не показывать</button></div>`;
@@ -3716,7 +3714,7 @@ document.addEventListener("click",async e=>{
   const b=e.target.closest&&e.target.closest("button"); if(!b) return;
   if(b.id==="instGo"){
     if(TG_HOME){ tgHomeAdd(); return; }
-    if(TG){ openExternal(APP_URL+"?install=1"); return; }
+    if(TG){ openExternal(IS_IOS?"https://apps.apple.com/app/telegram-messenger/id686449807":"https://play.google.com/store/apps/details?id=org.telegram.messenger"); return; }
     if(bipEvt){ bipEvt.prompt(); const ch=await bipEvt.userChoice.catch(()=>null); bipEvt=null; if(ch&&ch.outcome==="accepted"){ installSet({installed:today()}); renderAll(); } return; }
     showInstallGuide();
   } else if(b.id==="instLater"){ installSet({snooze:addDays(today(),3)}); renderAll(); toast("Напомню через пару дней"); }
