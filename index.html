@@ -23,7 +23,6 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Дневник">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>if(/[?&]run=health/.test(location.search)){var u="shortcuts://run-shortcut?name="+encodeURIComponent("Здоровье в дневник");location.replace(u);document.addEventListener("DOMContentLoaded",function(){document.body.innerHTML='<div style="font:17px/1.4 -apple-system,system-ui,sans-serif;padding:60px 24px;text-align:center;color:#1b2a20;background:#F2F5F1;min-height:100vh"><p>Открываю «Команды»…</p><p><a href="'+u+'" style="display:inline-block;margin-top:12px;padding:14px 22px;border-radius:14px;background:#2E6B4F;color:#fff;text-decoration:none;font-weight:600">Запустить команду</a></p><p style="font-size:14px;color:#5a6b60;margin-top:24px">Команда сама вернёт тебя в дневник с шагами.</p></div>';});}</script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700&display=swap">
@@ -407,7 +406,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 57</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 59</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -585,9 +584,10 @@ const num = v => { const n=parseFloat(String(v).replace(",",".")); return isNaN(
 /* ---------- хранилище: Telegram CloudStorage (в боте) или память телефона ---------- */
 const TG = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) ? window.Telegram.WebApp : null;
 const LS_KEY="dnevnik-v1", LS_DIRTY="dnevnik-dirty", CHUNK=3500;
-const tgCall = (fn,...args) => new Promise((res,rej)=>{ try{ TG.CloudStorage[fn](...args,(err,val)=>err?rej(err):res(val)); }catch(e){ rej(e); } });
+// вызов облака Telegram; если Telegram не ответил за 10 с — считаем ошибкой, чтобы очередь не зависала навсегда
+const tgCall = (fn,...args) => new Promise((res,rej)=>{ const t=setTimeout(()=>rej(new Error("timeout")),10000); try{ TG.CloudStorage[fn](...args,(err,val)=>{ clearTimeout(t); err?rej(err):res(val); }); }catch(e){ clearTimeout(t); rej(e); } });
 const Store = {
-  mode:"loading", docs:{}, localOk:true, parts:{}, dirty:new Set(), q:Promise.resolve(), synced:false,
+  mode:"loading", docs:{}, localOk:true, parts:{}, dirty:new Set(), q:Promise.resolve(), synced:false, busy:0, failed:false,
   async init(){
     try{ this.docs=JSON.parse(localStorage.getItem(LS_KEY)||"{}"); }catch(e){ this.docs={}; }
     try{ this.dirty=new Set(JSON.parse(localStorage.getItem(LS_DIRTY)||"[]")); }catch(e){}
@@ -595,9 +595,14 @@ const Store = {
     const cloud = !!(TG && TG.CloudStorage && TG.isVersionAtLeast && TG.isVersionAtLeast("6.9")) && consentOk();   // без согласия — только память телефона
     this.mode = cloud ? "tg" : "local";
     onReady();
-    if(cloud) this.syncFromCloud();
+    if(cloud){ this.syncFromCloud();
+      // повтор: если что-то не ушло в облако — пробуем ещё раз каждые 20 с и при возврате в приложение
+      const retry=()=>{ if(this.mode==="tg"&&!this.busy&&this.dirty.size){ if(!this.synced) this.syncFromCloud(); else [...this.dirty].forEach(k=>this._push(k)); } };
+      setInterval(retry,20000); document.addEventListener("visibilitychange",()=>{ if(!document.hidden) setTimeout(retry,800); });
+    }
   },
   async syncFromCloud(){
+    if(this._syncing) return; this._syncing=true;
     setSync("Синхронизация…",false);
     try{
       const keys = await tgCall("getKeys");
@@ -617,18 +622,20 @@ const Store = {
       [...this.dirty].forEach(k=>this._push(k));
       this.synced=true; setSyncMode(); fillProfileForm();
       if(!hadProfile && profile()) go("diary"); else renderAll();
-    }catch(e){ setSync("Нет связи с Telegram — сохранено на телефоне",false); }
+    }catch(e){ this.failed=true; setSync("Нет связи с Telegram — сохранено на телефоне",false); }
+    this._syncing=false;
   },
   _testLocal(){ try{ localStorage.setItem("dnevnik-test","1"); localStorage.removeItem("dnevnik-test"); return true; }catch(e){ return false; } },
   _saveLocal(){ try{ localStorage.setItem(LS_KEY,JSON.stringify(this.docs)); localStorage.setItem(LS_DIRTY,JSON.stringify([...this.dirty])); this.localOk=true; }catch(e){ this.localOk=false; } },
   get(k){ return this.docs[k]; },
   set(k,v,quiet){
     this.docs[k]=v;
-    if(this.mode==="tg"){ this.dirty.add(k); this._push(k); }
+    if(this.mode==="tg"){ this.dirty.add(k); this._push(k); if(this.synced) setSyncMode(); }
     this._saveLocal(); if(!this.localOk && this.mode!=="tg") setSyncMode();
     if(!quiet) renderAll();
   },
   _push(k){
+    this.busy++;
     this.q = this.q.then(async()=>{
       const v=this.docs[k];
       try{
@@ -650,8 +657,10 @@ const Store = {
           }
         }
         if(this.docs[k]===v){ this.dirty.delete(k); this._saveLocal(); }
-        if(this.synced) setSyncMode();
-      }catch(e){ setSync("Не синхронизировано — сохранено на телефоне",false); }
+        this.failed=false;
+      }catch(e){ this.failed=true; }
+      this.busy--;
+      if(!this.busy) setSyncMode();
     });
   },
   replaceAll(docs){
@@ -662,7 +671,11 @@ const Store = {
 };
 function setSync(t,on){ const s=$("sync"); s.className="sync"+(on?" on":""); s.querySelector("span").textContent=t; }
 function setSyncMode(){
-  if(Store.mode==="tg") setSync(Store.dirty.size?"Сохраняется…":"Сохранено в Telegram",!Store.dirty.size);
+  if(Store.mode==="tg"){
+    if(!Store.dirty.size) setSync("Сохранено в Telegram",true);
+    else if(Store.busy) setSync("Сохраняется…",false);
+    else setSync("Сохранено на телефоне",true);   // в облако Telegram отправится позже, само
+  }
   else if(Store.localOk) setSync("Сохраняется на этом телефоне",true);
   else setSync("Не сохраняется!",false);
   const b=$("localNote"); if(b){ b.hidden=Store.mode==="tg";
@@ -2403,11 +2416,25 @@ function applyHealth(sp){
 }
 const SC_NAME="Здоровье в дневник";
 // ссылка iCloud на готовую команду (новую, без сервера) — из config.json → healthShortcut2
-let HEALTH_SC2="https://www.icloud.com/shortcuts/137e4eae379444cb81c38eff0061342c";
+let HEALTH_SC2="https://www.icloud.com/shortcuts/3bd5cb99d9194729b50c27b87df48dd6";
 fetch("config.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{ if(j&&j.healthShortcut2){ HEALTH_SC2=String(j.healthShortcut2).trim(); try{ renderServerCards(); renderDiary(); }catch(e){} } }).catch(()=>{});
-const hcGet=()=>{ const v=(Store.get("hc2")||{}).state; if(v) return v; try{ return localStorage.getItem("hc2-state")||""; }catch(e){ return ""; } };
-const hcSet=v=>{ try{ Store.set("hc2",{state:v}); }catch(e){} try{ localStorage.setItem("hc2-state",v); }catch(e){} };
-function hcConnect(){ if(!HEALTH_SC2){ go("profile"); setTimeout(()=>{ const c=$("healthCard"); if(c) c.scrollIntoView({behavior:"smooth",block:"start"}); },300); return; } hcSet("pending"); openExternal(HEALTH_SC2); }
+const hcGet=()=>{ const v=(Store.get("hc3")||{}).state; if(v) return v; try{ return localStorage.getItem("hc3-state")||""; }catch(e){ return ""; } };
+const hcSet=v=>{ try{ Store.set("hc3",{state:v}); }catch(e){} try{ localStorage.setItem("hc3-state",v); }catch(e){} };
+// личный код для команды: сервер вычисляет его из Telegram ID, ничего не хранит
+let hsCode=""; try{ hsCode=localStorage.getItem("hs-code")||""; }catch(e){}
+async function hsFetch(){ if(hsCode||!serverReady()) return hsCode; try{ const r=await sapi("health/code",{}); hsCode=r.code||""; try{ localStorage.setItem("hs-code",hsCode); }catch(e){} }catch(e){} return hsCode; }
+function hsShowCode(code){
+  openSheet2(`<div class="row" style="justify-content:space-between"><h2>Твой код</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div>
+    <p class="note" style="margin:0">Выдели и скопируй, потом вставь в команду, когда айфон спросит «Вставь код из дневника»:</p>
+    <textarea rows="2" readonly style="font:600 18px/1.3 ui-monospace,monospace;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(code)}</textarea>`);
+}
+async function hsCopy(){
+  const code = hsCode || await hsFetch();
+  if(!code){ toast("Не получилось получить код — нужна связь с сервером. Попробуй с VPN"); return; }
+  try{ await navigator.clipboard.writeText(code); toast("Код скопирован"); }catch(e){ hsShowCode(code); }
+}
+const curTabIsDiary=()=>tab==="diary";
+function hcConnect(){ if(!HEALTH_SC2||curTabIsDiary()){ go("profile"); setTimeout(()=>{ const c=$("healthCard"); if(c) c.scrollIntoView({behavior:"smooth",block:"start"}); },300); return; } hcSet("pending"); openExternal(HEALTH_SC2); }
 function applyHealthData(h){
   if(!h||!/^\d{4}-\d{2}-\d{2}$/.test(h.date||"")||!h.at) return false;
   const day=clone(getDay(h.date)); if(day.health&&(day.health.at||0)>=h.at) return false;
@@ -2419,38 +2446,34 @@ function applyHealthData(h){
   toast(parts.length?"Из «Здоровья»: "+parts.join(", "):"Из «Здоровья» пришли пустые данные — проверь доступ команды к «Здоровью»");
   return true;
 }
-function runHealthShortcut(){
-  // команда сама соберёт шаги, активность и вес и откроет дневник в Telegram по ссылке — сервер не нужен
-  // из Telegram напрямую «Команды» не открываются — открываем страницу в браузере, она запускает команду
-  if(TG){ try{ TG.openLink(APP_URL+"?run=health"); return; }catch(e){} }
-  location.href=`shortcuts://run-shortcut?name=${encodeURIComponent(SC_NAME)}`;
-}
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden && hcGet()==="pending"){ hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} }
 });
 function healthDiaryBtn(){
   if(!IS_IOS||curDate!==today()) return "";
-  if(hcGet()!=="added") return `<div class="row" style="margin-top:12px;gap:10px;align-items:center"><button class="grow" id="hcConnect">❤️ Подключить «Здоровье»</button><button class="ghost small" id="hcHave" style="padding:0">Уже добавлена</button></div>`;
+  if(hcGet()!=="added") return `<div class="row" style="margin-top:12px;gap:10px;align-items:center"><button class="grow" id="hcConnect">❤️ Шаги из «Здоровья» — подключить</button></div>`;
   const h=getDay(today()).health, t=h&&h.at?new Date(h.at):null;
-  const when=t?` · обновлено в ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`:"";
-  return `<button id="hcRun" style="margin-top:12px;width:100%">↻ Обновить из «Здоровья»</button>${when?`<div class="note" style="margin-top:4px;text-align:center">Шаги и активность${when}</div>`:""}`;
+  return t?`<div class="note" style="margin-top:8px;text-align:center">Шаги и активность из «Здоровья» · ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}</div>`:"";
 }
 function healthCardHtml(){
-  const intro=`<p class="note" style="margin:0">Шаги, активные калории и сегодняшний вес — из «Здоровья», часов и умных весов. Данные идут прямо с телефона в дневник.</p>`;
-  if(hcGet()!=="added") return intro+(HEALTH_SC2?`
-    <button class="primary" id="hcConnect">Подключить «Здоровье»</button>
-    <p class="note" style="margin:0">Айфон покажет команду — нажми «Добавить быструю команду», потом вернись сюда и нажми «Обновить из „Здоровья“». В первый раз разреши команде доступ к «Здоровью».</p>`:HEALTH_GUIDE)+`
-    <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Команда «${SC_NAME}» уже есть</button>`;
-  return intro+`
-    <button class="primary" id="hcRun">Обновить из «Здоровья»</button>
-    <p class="note" style="margin:0">Откроются «Команды», потом дневник сам откроется снова — с шагами и весом.</p>
-    <details><summary class="small muted">Пишет «Не удалось найти быструю команду»?</summary><p class="small" style="margin:6px 0">В приложении «Команды» должна быть команда с названием ровно <b>${SC_NAME}</b>. Переименуй её: долгое нажатие → «Переименовать». Лишние копии удали.</p></details>
-    <details><summary class="small muted">Как собрать команду заново</summary>${HEALTH_GUIDE}</details>
-    <details><summary class="small"><b>Чтобы приходило само каждый вечер</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
+  if(serverReady()&&!hsCode) setTimeout(hsFetch,50);
+  const intro=`<p class="note" style="margin:0">Шаги, активные калории и вес — из «Здоровья», часов и умных весов. Настраивается один раз, дальше бот сам присылает цифры с кнопкой «Добавить в дневник».</p>`;
+  const auto=`<ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
       <li>Приложение «Команды» → внизу «Автоматизация» → «+».</li>
       <li>«Время суток» → например 21:30, «Ежедневно» → «Запускать сразу» → «Далее».</li>
-      <li>Выбери команду «${SC_NAME}». Готово — в это время дневник сам откроется в Telegram с данными.</li>
-    </ol></details>
+      <li>Выбери команду «${SC_NAME}». Готово.</li></ol>`;
+  if(hcGet()!=="added") return intro+`
+    <ol class="small" style="padding-left:18px;margin:4px 0;display:flex;flex-direction:column;gap:10px">
+      <li><button class="primary" id="hsCopy" style="width:100%">1. Скопировать мой код</button></li>
+      <li><button class="primary" id="hcConnect" style="width:100%">2. Добавить команду</button><span class="note">Айфон спросит код — вставь. Нажми «Добавить быструю команду».</span></li>
+      <li><b>3. Чтобы приходило само каждый вечер:</b>${auto}</li>
+    </ol>
+    <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Готово, всё настроила</button>`;
+  return intro+`
+    <p class="small" style="margin:0">✅ Подключено. Каждый вечер бот пришлёт шаги — нажми в сообщении <b>«Добавить в дневник»</b>.</p>
+    <details><summary class="small muted">Проверить сейчас</summary><p class="small" style="margin:6px 0">Открой «Команды» и нажми на «${SC_NAME}». Через пару секунд придёт сообщение от бота.</p></details>
+    <details><summary class="small muted">Автоматизация на вечер</summary>${auto}</details>
+    <details><summary class="small muted">Бот пишет «Код не подошёл»</summary><p class="small" style="margin:6px 0">Скопируй код ещё раз и вставь его в команде вместо старого (первое действие «Текст»).</p><button class="ghost small" id="hsCopy" style="padding:0">Скопировать мой код</button></details>
     <button class="ghost small" id="hcReset" style="padding:0;align-self:flex-start">Подключить заново</button>`;
 }
 const HEALTH_BUILD=()=>`<details><summary class="small"><b>Собрать команду (делается один раз — потом все добавляют её в одно нажатие)</b></summary><ol class="small" style="padding-left:18px;margin:8px 0;display:flex;flex-direction:column;gap:6px">
@@ -2721,7 +2744,7 @@ function bindIntegrations(){
       case "botChat": if(TG){ try{ TG.openTelegramLink("https://t.me/"+BOT_USERNAME); TG.close(); }catch(e){} } else openExternal("https://t.me/"+BOT_USERNAME); break;
       case "hcConnect": hcConnect(); break;
       case "hcHave": hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} break;
-      case "hcRun": runHealthShortcut(); break;
+      case "hsCopy": hsCopy(); break;
       default: if(b.dataset.copytext){ const t=b.dataset.copytext; (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast("Скопировано")).catch(()=>{ openSheet2(`<div class="row" style="justify-content:space-between"><h2>Скопируй</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><textarea rows="3" style="font:inherit;font-size:14px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(t)}</textarea>`); }); } break;
       case "hcReset": hcSet(""); renderServerCards(); try{ renderDiary(); }catch(e){} break;
       case "loginCancel": clearInterval(loginTimer); loginNonce=null; try{ localStorage.removeItem(LN_KEY); }catch(e){} renderLoginCard(); break;
@@ -2883,7 +2906,7 @@ setTimeout(hideSplash,4000); // на всякий случай
 const TIPS={
   diary:[
     ["#summary","Итог дня","Сколько съедено и сколько осталось до нормы. Шаги и активность из «Здоровья» и тренировки прибавляются к норме."],
-    ["#hcRun,#hcConnect","Шаги из «Здоровья»","Нажми — и шаги с активными калориями подтянутся с айфона и часов."],
+    ["#hcConnect","Шаги из «Здоровья»","Настрой один раз — и бот будет сам присылать шаги с кнопкой «Добавить в дневник»."],
     ["#tab-diary .datebar","Другие дни","Листай дни стрелками — можно дописать вчерашнее или посмотреть прошлую неделю."],
     ["#mealSeg","Приём пищи","Выбери, куда записать: завтрак, обед, перекус или ужин."],
     ["#fName","Продукт и вес","Начни вводить название — калории и БЖУ посчитаются сами. Можно сразу с весом: «творог 5% 150»."],
@@ -3532,7 +3555,7 @@ const FEATURES=[
  ["ИИ-помощник","assistant","🧠","Что съесть, чтобы уложиться в норму","Помощник смотрит, сколько калорий осталось и что есть дома, и предлагает 3 варианта. Понравившийся записывается одной кнопкой.","Дневник → «Помощник» → «Что съесть сейчас?». Или спроси своими словами: «что съесть на ужин до 400 ккал?»",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); else flashEl("#botHint"); },300); },()=>typeof asstLog!=="undefined"&&asstLog.length>0],
  ["ИИ-помощник","cafe","🧾","Выбор в кафе по фото меню","Помощник прочитает меню ресторана и выберет 3 блюда, которые впишутся в твою норму, плюс подскажет, как сэкономить калории.","Дневник → «Помощник» → «Меню кафе по фото» → сфотографируй страницу меню.",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
  ["ИИ-помощник","review","📊","Разбор недели","Как от нутрициолога: что получилось, на что обратить внимание и один выполнимый совет на следующую неделю.","Приходит сам в бот по воскресеньям, если за неделю было хотя бы 3 дня с записями. Или: Дневник → «Помощник» → «Разбор недели».",()=>{ go("diary"); setTimeout(()=>{ if($("assistOpen")&&!$("assistOpen").hidden) openAssistant(); },300); },null],
- ["Тело и здоровье","health","❤️","Шаги из «Здоровья» на iPhone","Шаги и активные калории с iPhone и часов прибавляются к норме — в активный день можно съесть больше.","Дневник → кнопка «Подключить Здоровье» → один раз установи быструю команду по инструкции. Потом обновляешь одной кнопкой.",()=>{ go("diary"); flashEl("#hcRun,#hcConnect"); },()=>!!(typeof hcGet==="function"&&hcGet())],
+ ["Тело и здоровье","health","❤️","Шаги из «Здоровья» на iPhone","Шаги и активные калории с iPhone и часов прибавляются к норме — в активный день можно съесть больше.","Профиль → «Здоровье» на iPhone: скопируй код, добавь команду и включи автоматизацию. Дальше бот сам присылает шаги — нажимаешь «Добавить в дневник».",()=>{ closeSheet(); go("profile"); setTimeout(()=>{ const c=$("healthCard"); if(c) c.scrollIntoView({behavior:"smooth",block:"start"}); },300); },()=>!!(typeof hcGet==="function"&&hcGet()==="added")],
  ["Тело и здоровье","weight","⚖️","Вес, талия и дата цели","Видно, как идёт похудение, и примерную дату, когда дойдёшь до цели. Дошла до цели — переключись в Профиле на «Поддержание»: норма станет такой, чтобы вес держался, а на графике появится коридор ±1,5 кг.","Вкладка «Вес» → впиши вес (раз в неделю, утром натощак) и, по желанию, талию → «Сохранить». График — во вкладке «Прогресс».",()=>{ go("weight"); flashEl("#wKg"); },()=>weights().length>0],
  ["Тело и здоровье","cycle","🌸","Учёт цикла","Перед месячными вес часто растёт на 0,5–2 кг из-за воды. Приложение предупредит об этом заранее и отметит эти дни на графике — меньше поводов расстраиваться.","Вкладка «Вес» → «Цикл» → «Начались сегодня» в первый день месячных. Или напиши боту «начались».",()=>{ go("weight"); flashEl("#cycleCard"); },()=>cycleStarts().length>0,()=>cycleOn()],
  ["Тело и здоровье","fiber","🥦","Клетчатка","Кроме белков, жиров и углеводов считается клетчатка — она даёт сытость. Норма — 25 г в день для женщин, 30 г для мужчин.","Ничего делать не нужно — смотри полоску «Клетчатка» под БЖУ в Дневнике.",()=>{ go("diary"); flashEl(".fibrow"); },null],

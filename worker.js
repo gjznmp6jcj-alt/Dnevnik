@@ -101,6 +101,7 @@ export default {
       if (url.pathname === "/tg" && req.method === "POST") return await onTelegram(req, env, ctx);
       if (url.pathname.startsWith("/f/")) return await serveFile(env, url);
       if (url.pathname === "/h") return await healthIn(req, env, url);
+      if (url.pathname === "/hs") return await healthRelay(env, url);
       if (url.pathname === "/api/login/start") return cors(await loginStart(env), req);
       if (url.pathname === "/api/login/check") return cors(await loginCheck(env, url), req);
       if (url.pathname === "/api/login/code") return cors(await loginByCode(env, url, req), req);
@@ -1299,6 +1300,9 @@ async function api(req, env, url, user, ctx) {
     if (write.length) await env.KV.putMany(write);
     return json({ ok: true, accepted, newer });
   }
+  if (p === "health/code") {   // личный код для команды «Здоровье» — вычисляется, нигде не хранится
+    return json({ code: await hsCode(env, user.id) });
+  }
   if (p === "health/key") {   // личный ключ для быстрой команды «Здоровье»
     let k = await env.KV.get(`uhk:${user.id}`);
     if (!k) { k = rid(20); await env.KV.put(`hk:${k}`, user.id); await env.KV.put(`uhk:${user.id}`, k); }
@@ -1346,6 +1350,25 @@ async function api(req, env, url, user, ctx) {
 
 /* ---------------- «Здоровье»: данные от быстрой команды iPhone ---------------- */
 const hnum = v => { if (v == null) return 0; const m = String(v).replace(/[\s\u00a0\u202f]/g, "").replace(",", ".").match(/-?\d+(?:\.\d+)?/); return m ? +m[0] : 0; };
+// «Здоровье» через бота: команда присылает цифры, бот пересылает их человеку кнопкой. Ничего не сохраняется.
+async function hsCode(env, uid) { return `${uid}-${hex(await hmac(env.BOT_TOKEN, "hs:" + uid)).slice(0, 12)}`; }
+async function healthRelay(env, url) {
+  const k = String(url.searchParams.get("k") || "").trim();
+  const m = k.match(/^(\d{1,15})-([0-9a-f]{12})$/);
+  if (!m || (await hsCode(env, m[1])) !== k) return text("❌ Код не подошёл. Открой дневник → «Профиль» → «Здоровье» → «Скопировать мой код» и вставь его в команду (действие «Текст»).");
+  const uid = m[1];
+  const steps = Math.max(0, Math.min(200000, Math.round(hnum(url.searchParams.get("s")))));
+  const active = Math.max(0, Math.min(20000, Math.round(hnum(url.searchParams.get("a")))));
+  let w = hnum(url.searchParams.get("w")); if (w >= 200) w = w / 10; w = (w > 20 && w < 400) ? Math.round(w * 10) / 10 : 0;
+  const s = await userSettings(env, uid), date = localDate(new Date(), s.tz);
+  const bot = await botUsername(env);
+  const parts = []; if (steps) parts.push(`${fmt(steps)} шагов`); if (active) parts.push(`${fmt(active)} ккал активности`); if (w) parts.push(`вес ${fmt1(w)} кг`);
+  if (!parts.length) return text("⚠️ Из «Здоровья» ничего не пришло. Запусти команду в приложении «Команды» и разреши доступ к шагам и активной энергии.");
+  const link = `https://t.me/${bot}?startapp=h_${steps}_${active}_${Math.round(w * 10)}_${date}`;
+  const ok = await send(env, uid, `❤️ <b>Из «Здоровья»</b> за ${date.slice(8, 10)}.${date.slice(5, 7)}: ${parts.join(", ")}.`, { reply_markup: { inline_keyboard: [[{ text: "Добавить в дневник", url: link }]] } });
+  return text(ok ? "✅ Отправлено в Telegram" : "⚠️ Бот не смог написать. Открой бота в Telegram и нажми «Старт».");
+}
+
 async function healthIn(req, env, url) {
   let b = {};
   if (req.method === "POST") { const t = await req.text(); try { b = JSON.parse(t) || {}; } catch (e) { b = Object.fromEntries(new URLSearchParams(t)); } }
