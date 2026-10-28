@@ -406,7 +406,7 @@ button.eat{background:var(--accent-soft);color:var(--accent);padding:6px 0;width
       <button id="diagBtn">Проверить связь с базой продуктов</button>
       <div id="diagOut" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
     </div>
-    <p class="note" id="verLine">Версия приложения: 2026-10-27 · 54</p>
+    <p class="note" id="verLine">Версия приложения: 2026-10-28 · 56</p>
     <p class="note">Расчёты ориентировочные (формула Миффлина — Сан Жеора). Норма не опускается ниже 1200 ккал для женщин и 1500 ккал для мужчин. При заболеваниях, беременности и кормлении грудью согласуй питание с врачом.</p>
   </section>
 </div>
@@ -2402,7 +2402,7 @@ function applyHealth(sp){
 }
 const SC_NAME="Здоровье в дневник";
 // ссылка iCloud на готовую команду (новую, без сервера) — из config.json → healthShortcut2
-let HEALTH_SC2="";
+let HEALTH_SC2="https://www.icloud.com/shortcuts/137e4eae379444cb81c38eff0061342c";
 fetch("config.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{ if(j&&j.healthShortcut2){ HEALTH_SC2=String(j.healthShortcut2).trim(); try{ renderServerCards(); renderDiary(); }catch(e){} } }).catch(()=>{});
 const hcGet=()=>{ const v=(Store.get("hc2")||{}).state; if(v) return v; try{ return localStorage.getItem("hc2-state")||""; }catch(e){ return ""; } };
 const hcSet=v=>{ try{ Store.set("hc2",{state:v}); }catch(e){} try{ localStorage.setItem("hc2-state",v); }catch(e){} };
@@ -2436,7 +2436,7 @@ function healthCardHtml(){
   const intro=`<p class="note" style="margin:0">Шаги, активные калории и сегодняшний вес — из «Здоровья», часов и умных весов. Данные идут прямо с телефона в дневник.</p>`;
   if(hcGet()!=="added") return intro+(HEALTH_SC2?`
     <button class="primary" id="hcConnect">Подключить «Здоровье»</button>
-    <p class="note" style="margin:0">Айфон покажет команду — нажми «Добавить быструю команду» и вернись сюда.</p>`:HEALTH_GUIDE)+`
+    <p class="note" style="margin:0">Айфон покажет команду — нажми «Добавить быструю команду», потом вернись сюда и нажми «Обновить из „Здоровья“». В первый раз разреши команде доступ к «Здоровью».</p>`:HEALTH_GUIDE)+`
     <button class="ghost small" id="hcHave" style="padding:0;align-self:flex-start">Команда «${SC_NAME}» уже есть</button>`;
   return intro+`
     <button class="primary" id="hcRun">Обновить из «Здоровья»</button>
@@ -2460,8 +2460,8 @@ const HEALTH_GUIDE=`<details><summary><b>Как собрать команду (5
 <li><b>Шаги.</b> Действие <b>«Найти образцы здоровья»</b>: Тип — <b>Шаги</b>, Дата начала — <b>Сегодня</b>. Потом <b>«Вычислить статистику»</b> → <b>Сумма</b>. Потом <b>«Округлить число»</b>.</li>
 <li><b>Активность.</b> Снова <b>«Найти образцы здоровья»</b>: Тип — <b>Активная энергия</b>, Дата начала — <b>Сегодня</b> → <b>«Вычислить статистику»</b> → <b>Сумма</b> → <b>«Округлить число»</b>.</li>
 <li><b>Вес</b> (можно пропустить). <b>«Найти образцы здоровья»</b>: Тип — <b>Вес</b>, сортировка — <b>Дата начала, сначала новые</b>, ограничение — <b>1</b>. Потом <b>«Вычислить»</b>: × 10. Потом <b>«Округлить число»</b>.</li>
-<li>Действие <b>«Текст»</b>. Впиши <code>https://t.me/${BOT_USERNAME}?startapp=h_</code>, потом вставь округлённые шаги (кнопка «Переменная»), знак <code>_</code>, округлённую активность, <code>_</code>, округлённый вес. Без веса — допиши <code>_0</code>. Пробелов быть не должно.</li>
-<li>Последнее действие — <b>«Открыть URL-адреса»</b>.</li>
+<li>Действие <b>«Текст»</b>. Вставь начало ссылки: <code>https://t.me/${BOT_USERNAME}?startapp=h_</code> <button type="button" class="ghost small" data-copytext="https://t.me/${BOT_USERNAME}?startapp=h_" style="padding:0 4px">Скопировать</button><br>Сразу за ним — округлённые шаги (кнопка «Переменная»), знак <code>_</code>, округлённую активность. Если нужен вес — ещё <code>_</code> и округлённый вес. Всё одной строкой, без пробелов.</li>
+<li>Последнее действие — <b>«Открыть URL»</b> (значок ↗). В нём должно стоять «Открыть <b>Текст</b>».</li>
 <li>Нажми ▶︎ внизу: разреши доступ к «Здоровью» — откроется дневник с шагами.</li>
 </ol></details>`;
 
@@ -2719,6 +2719,7 @@ function bindIntegrations(){
       case "hcConnect": hcConnect(); break;
       case "hcHave": hcSet("added"); renderServerCards(); try{ renderDiary(); }catch(e){} break;
       case "hcRun": runHealthShortcut(); break;
+      default: if(b.dataset.copytext){ const t=b.dataset.copytext; (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast("Скопировано")).catch(()=>{ openSheet2(`<div class="row" style="justify-content:space-between"><h2>Скопируй</h2><button class="icon" data-close2 aria-label="Закрыть">✕</button></div><textarea rows="3" style="font:inherit;font-size:14px;width:100%;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px">${esc(t)}</textarea>`); }); } break;
       case "hcReset": hcSet(""); renderServerCards(); try{ renderDiary(); }catch(e){} break;
       case "loginCancel": clearInterval(loginTimer); loginNonce=null; try{ localStorage.removeItem(LN_KEY); }catch(e){} renderLoginCard(); break;
       case "logoutBtn": logout(); break;
